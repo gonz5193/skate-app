@@ -32,7 +32,86 @@ function LetterTrack({ count }) {
   )
 }
 
+function AuthScreen({ onAuthed }) {
+  const [mode, setMode] = useState('login') // 'login' or 'signup'
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [username, setUsername] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit() {
+    setError('')
+    setLoading(true)
+
+    if (mode === 'signup') {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { username } }
+      })
+      if (error) {
+        setError(error.message)
+      } else {
+        onAuthed(data.user)
+      }
+    } else {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        setError(error.message)
+      } else {
+        onAuthed(data.user)
+      }
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div className="app">
+      <div className="screen" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh', paddingBottom: 16 }}>
+        <div className="wordmark" style={{ justifyContent: 'center', fontSize: 40, marginBottom: 8 }}>
+          <span>SKATE</span><span>.</span>
+        </div>
+        <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 13, marginBottom: 32 }}>
+          {mode === 'login' ? 'Log in to call someone out' : 'Create your account'}
+        </div>
+
+        {mode === 'signup' && (
+          <div className="field">
+            <label>USERNAME</label>
+            <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="e.g. mayaslides" />
+          </div>
+        )}
+        <div className="field">
+          <label>EMAIL</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" />
+        </div>
+        <div className="field">
+          <label>PASSWORD</label>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 6 characters" />
+        </div>
+
+        {error && <div style={{ color: 'var(--tag)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+
+        <button className="btn-submit" style={{ width: '100%', marginTop: 8 }} onClick={handleSubmit} disabled={loading}>
+          {loading ? 'PLEASE WAIT…' : mode === 'login' ? 'LOG IN' : 'SIGN UP'}
+        </button>
+
+        <button
+          className="action-btn"
+          style={{ justifyContent: 'center', marginTop: 20 }}
+          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}
+        >
+          {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [screen, setScreen] = useState('feed')
   const [feed, setFeed] = useState([])
   const [loading, setLoading] = useState(true)
@@ -42,8 +121,21 @@ export default function App() {
   const [spot, setSpot] = useState('')
 
   useEffect(() => {
-    fetchGames()
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setAuthLoading(false)
+    })
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+
+    return () => listener.subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (session) fetchGames()
+  }, [session])
 
   async function fetchGames() {
     setLoading(true)
@@ -60,15 +152,15 @@ export default function App() {
     setLoading(false)
   }
 
+  async function handleLogout() {
+    await supabase.auth.signOut()
+    setFeed([])
+  }
+
   async function toggleLike(game) {
     const newLikes = game.likes + 1
     setFeed(feed.map(p => p.id === game.id ? { ...p, likes: newLikes } : p))
-
-    const { error } = await supabase
-      .from('games')
-      .update({ likes: newLikes })
-      .eq('id', game.id)
-
+    const { error } = await supabase.from('games').update({ likes: newLikes }).eq('id', game.id)
     if (error) console.error('Error updating likes:', error)
   }
 
@@ -76,12 +168,7 @@ export default function App() {
     if (landed) return
     const newLetters = Math.min(5, game.self_letters + 1)
     setFeed(feed.map(p => p.id === game.id ? { ...p, self_letters: newLetters } : p))
-
-    const { error } = await supabase
-      .from('games')
-      .update({ self_letters: newLetters })
-      .eq('id', game.id)
-
+    const { error } = await supabase.from('games').update({ self_letters: newLetters }).eq('id', game.id)
     if (error) console.error('Error updating letters:', error)
   }
 
@@ -113,6 +200,16 @@ export default function App() {
     setModalOpen(false)
     setScreen('feed')
   }
+
+  if (authLoading) {
+    return <div className="app" style={{ minHeight: '100vh' }} />
+  }
+
+  if (!session) {
+    return <AuthScreen onAuthed={() => {}} />
+  }
+
+  const displayName = session.user.user_metadata?.username || session.user.email.split('@')[0]
 
   return (
     <div className="app">
@@ -151,7 +248,7 @@ export default function App() {
                 </div>
                 <div className="vs-mid">VS</div>
                 <div className="vs-side" style={{ alignItems: 'flex-end' }}>
-                  <div className="vs-name">YOU</div>
+                  <div className="vs-name">{displayName.toUpperCase()}</div>
                   <LetterTrack count={p.opp_letters} />
                 </div>
               </div>
@@ -189,13 +286,13 @@ export default function App() {
       {screen === 'profile' && (
         <div className="screen">
           <div className="profile-head">
-            <div className="avatar" style={{ background: 'var(--wheel)' }}>MJ</div>
-            <div className="name">MAYA JIMENEZ</div>
-            <div className="handle">@mayaslides · Houston, TX</div>
+            <div className="avatar" style={{ background: 'var(--wheel)' }}>{initials(displayName)}</div>
+            <div className="name">{displayName.toUpperCase()}</div>
+            <div className="handle">{session.user.email}</div>
             <div className="stat-row">
-              <div className="stat win"><div className="num">41</div><div className="lbl">WINS</div></div>
-              <div className="stat loss"><div className="num">17</div><div className="lbl">LOSSES</div></div>
-              <div className="stat"><div className="num">6</div><div className="lbl">STREAK</div></div>
+              <div className="stat win"><div className="num">0</div><div className="lbl">WINS</div></div>
+              <div className="stat loss"><div className="num">0</div><div className="lbl">LOSSES</div></div>
+              <div className="stat"><div className="num">0</div><div className="lbl">STREAK</div></div>
             </div>
           </div>
           <div className="section-head">RECENT GAMES</div>
@@ -207,6 +304,7 @@ export default function App() {
               </div>
             </div>
           ))}
+          <button className="btn-cancel" style={{ width: '100%', marginTop: 12 }} onClick={handleLogout}>LOG OUT</button>
         </div>
       )}
 

@@ -208,4 +208,4 @@ body{
 }
 .modal-actions{ display:flex; gap:10px; margin-top:18px; }
 .btn-cancel{ background:var(--grip); color:var(--bone); flex:1; font-family:'Anton',sans-serif; padding:12px; border:none; border-radius:6px; cursor:pointer; }
-.btn-submit{ background:var(--wheel); color:#1a1200; flex:1; font-family:'Anton',sans-serif; padding:12px; border:none; border-radius:6px; cursor:pointer; }
+.btn-submit{ background:var(--wheel); color:#1a1200; font-family:'Anton',sans-serif; padding:12px; border:none; border-radius:6px; cursor:pointer; }
