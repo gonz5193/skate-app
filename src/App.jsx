@@ -107,6 +107,8 @@ export default function App() {
   const [selectedOpponent, setSelectedOpponent] = useState('')
   const [trick, setTrick] = useState('')
   const [spot, setSpot] = useState('')
+  const [videoFile, setVideoFile] = useState(null)
+  const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -132,9 +134,8 @@ export default function App() {
       .select('id, username')
       .neq('id', session.user.id)
 
-    if (error) {
-      console.error('Error fetching players:', error)
-    } else {
+    if (error) console.error('Error fetching players:', error)
+    else {
       setPlayers(data)
       if (data.length > 0) setSelectedOpponent(data[0].id)
     }
@@ -176,6 +177,30 @@ export default function App() {
     const opponentProfile = players.find(p => p.id === selectedOpponent)
     if (!opponentProfile) return
 
+    setUploading(true)
+    let videoUrl = null
+
+    if (videoFile) {
+      const fileExt = videoFile.name.split('.').pop()
+      const fileName = `${session.user.id}-${Date.now()}.${fileExt}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('trick-clips')
+        .upload(fileName, videoFile)
+
+      if (uploadError) {
+        console.error('Error uploading video:', uploadError)
+        setUploading(false)
+        return
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('trick-clips')
+        .getPublicUrl(fileName)
+
+      videoUrl = urlData.publicUrl
+    }
+
     const { data, error } = await supabase
       .from('games')
       .insert([{
@@ -186,9 +211,12 @@ export default function App() {
         trick: (trick || 'Kickflip').toUpperCase(),
         self_letters: 0,
         opp_letters: 0,
-        likes: 0
+        likes: 0,
+        video_url: videoUrl
       }])
       .select()
+
+    setUploading(false)
 
     if (error) {
       console.error('Error creating game:', error)
@@ -198,6 +226,7 @@ export default function App() {
     setFeed([data[0], ...feed])
     setTrick('')
     setSpot('')
+    setVideoFile(null)
     setModalOpen(false)
     setScreen('feed')
   }
@@ -232,12 +261,16 @@ export default function App() {
                 </div>
                 <div className="time">{timeAgo(p.created_at)}</div>
               </div>
-              <div className="clip" style={{ background: `linear-gradient(160deg, ${colorFor(p.opponent_name || 'x')}, #0e0e0e 85%)` }}>
-                <div className="play-btn">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+              {p.video_url ? (
+                <video controls className="clip" style={{ width: '100%', background: '#000' }} src={p.video_url} />
+              ) : (
+                <div className="clip" style={{ background: `linear-gradient(160deg, ${colorFor(p.opponent_name || 'x')}, #0e0e0e 85%)` }}>
+                  <div className="play-btn">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                  </div>
+                  <div className="trick-tag">{p.trick}</div>
                 </div>
-                <div className="trick-tag">{p.trick}</div>
-              </div>
+              )}
               <div className="vs-row">
                 <div className="vs-side">
                   <div className="vs-name">{(p.opponent_name || '').split(' ')[0].toUpperCase()}</div>
@@ -347,9 +380,15 @@ export default function App() {
               <label>SPOT</label>
               <input type="text" value={spot} onChange={e => setSpot(e.target.value)} placeholder="e.g. Locals Only skatepark" />
             </div>
+            <div className="field">
+              <label>VIDEO CLIP</label>
+              <input type="file" accept="video/*" onChange={e => setVideoFile(e.target.files[0])} />
+            </div>
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setModalOpen(false)}>CANCEL</button>
-              <button className="btn-submit" onClick={createGame} disabled={players.length === 0}>POST CALLOUT</button>
+              <button className="btn-submit" onClick={createGame} disabled={players.length === 0 || uploading}>
+                {uploading ? 'UPLOADING…' : 'POST CALLOUT'}
+              </button>
             </div>
           </div>
         </div>
