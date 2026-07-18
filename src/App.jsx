@@ -33,7 +33,7 @@ function LetterTrack({ count }) {
 }
 
 function AuthScreen({ onAuthed }) {
-  const [mode, setMode] = useState('login') // 'login' or 'signup'
+  const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
@@ -43,25 +43,16 @@ function AuthScreen({ onAuthed }) {
   async function handleSubmit() {
     setError('')
     setLoading(true)
-
     if (mode === 'signup') {
       const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { username } }
+        email, password, options: { data: { username } }
       })
-      if (error) {
-        setError(error.message)
-      } else {
-        onAuthed(data.user)
-      }
+      if (error) setError(error.message)
+      else onAuthed(data.user)
     } else {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) {
-        setError(error.message)
-      } else {
-        onAuthed(data.user)
-      }
+      if (error) setError(error.message)
+      else onAuthed(data.user)
     }
     setLoading(false)
   }
@@ -75,7 +66,6 @@ function AuthScreen({ onAuthed }) {
         <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 13, marginBottom: 32 }}>
           {mode === 'login' ? 'Log in to call someone out' : 'Create your account'}
         </div>
-
         {mode === 'signup' && (
           <div className="field">
             <label>USERNAME</label>
@@ -90,13 +80,10 @@ function AuthScreen({ onAuthed }) {
           <label>PASSWORD</label>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 6 characters" />
         </div>
-
         {error && <div style={{ color: 'var(--tag)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-
         <button className="btn-submit" style={{ width: '100%', marginTop: 8 }} onClick={handleSubmit} disabled={loading}>
           {loading ? 'PLEASE WAIT…' : mode === 'login' ? 'LOG IN' : 'SIGN UP'}
         </button>
-
         <button
           className="action-btn"
           style={{ justifyContent: 'center', marginTop: 20 }}
@@ -114,9 +101,10 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [screen, setScreen] = useState('feed')
   const [feed, setFeed] = useState([])
+  const [players, setPlayers] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
-  const [opp, setOpp] = useState('@leo_ollies (Berlin)')
+  const [selectedOpponent, setSelectedOpponent] = useState('')
   const [trick, setTrick] = useState('')
   const [spot, setSpot] = useState('')
 
@@ -125,17 +113,32 @@ export default function App() {
       setSession(session)
       setAuthLoading(false)
     })
-
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
     })
-
     return () => listener.subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
-    if (session) fetchGames()
+    if (session) {
+      fetchGames()
+      fetchPlayers()
+    }
   }, [session])
+
+  async function fetchPlayers() {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .neq('id', session.user.id)
+
+    if (error) {
+      console.error('Error fetching players:', error)
+    } else {
+      setPlayers(data)
+      if (data.length > 0) setSelectedOpponent(data[0].id)
+    }
+  }
 
   async function fetchGames() {
     setLoading(true)
@@ -144,11 +147,8 @@ export default function App() {
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('Error fetching games:', error)
-    } else {
-      setFeed(data)
-    }
+    if (error) console.error('Error fetching games:', error)
+    else setFeed(data)
     setLoading(false)
   }
 
@@ -173,15 +173,16 @@ export default function App() {
   }
 
   async function createGame() {
-    const name = opp.split(' (')[0].replace('@','').replace(/_/g,' ')
-    const location = opp.split('(')[1].replace(')','')
-    const displayName = name.charAt(0).toUpperCase() + name.slice(1)
+    const opponentProfile = players.find(p => p.id === selectedOpponent)
+    if (!opponentProfile) return
 
     const { data, error } = await supabase
       .from('games')
       .insert([{
-        opponent_name: displayName,
-        spot: (spot || 'Local spot') + ', ' + location,
+        challenger_id: session.user.id,
+        opponent_id: opponentProfile.id,
+        opponent_name: opponentProfile.username,
+        spot: spot || 'Local spot',
         trick: (trick || 'Kickflip').toUpperCase(),
         self_letters: 0,
         opp_letters: 0,
@@ -201,15 +202,11 @@ export default function App() {
     setScreen('feed')
   }
 
-  if (authLoading) {
-    return <div className="app" style={{ minHeight: '100vh' }} />
-  }
-
-  if (!session) {
-    return <AuthScreen onAuthed={() => {}} />
-  }
+  if (authLoading) return <div className="app" style={{ minHeight: '100vh' }} />
+  if (!session) return <AuthScreen onAuthed={() => {}} />
 
   const displayName = session.user.user_metadata?.username || session.user.email.split('@')[0]
+  const myGames = feed.filter(g => g.challenger_id === session.user.id || g.opponent_id === session.user.id)
 
   return (
     <div className="app">
@@ -228,14 +225,14 @@ export default function App() {
           {feed.map((p) => (
             <div className="feed-card" key={p.id}>
               <div className="feed-card-head">
-                <div className="avatar" style={{ background: colorFor(p.opponent_name), color: '#fff' }}>{initials(p.opponent_name)}</div>
+                <div className="avatar" style={{ background: colorFor(p.opponent_name || 'x'), color: '#fff' }}>{initials(p.opponent_name || '??')}</div>
                 <div className="who">
                   <div className="name">{p.opponent_name}</div>
                   <div className="spot">{p.spot}</div>
                 </div>
                 <div className="time">{timeAgo(p.created_at)}</div>
               </div>
-              <div className="clip" style={{ background: `linear-gradient(160deg, ${colorFor(p.opponent_name)}, #0e0e0e 85%)` }}>
+              <div className="clip" style={{ background: `linear-gradient(160deg, ${colorFor(p.opponent_name || 'x')}, #0e0e0e 85%)` }}>
                 <div className="play-btn">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="6 3 20 12 6 21 6 3"/></svg>
                 </div>
@@ -243,12 +240,12 @@ export default function App() {
               </div>
               <div className="vs-row">
                 <div className="vs-side">
-                  <div className="vs-name">{p.opponent_name.split(' ')[0].toUpperCase()}</div>
+                  <div className="vs-name">{(p.opponent_name || '').split(' ')[0].toUpperCase()}</div>
                   <LetterTrack count={p.self_letters} />
                 </div>
                 <div className="vs-mid">VS</div>
                 <div className="vs-side" style={{ alignItems: 'flex-end' }}>
-                  <div className="vs-name">{displayName.toUpperCase()}</div>
+                  <div className="vs-name">CHALLENGER</div>
                   <LetterTrack count={p.opp_letters} />
                 </div>
               </div>
@@ -267,7 +264,10 @@ export default function App() {
         <div className="screen">
           <button className="new-game-btn" onClick={() => setModalOpen(true)}>+ CALL OUT SOMEONE NEW</button>
           <div className="section-head">YOUR MOVE</div>
-          {feed.map((g) => (
+          {myGames.length === 0 && (
+            <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games yet. Call someone out above.</div>
+          )}
+          {myGames.map((g) => (
             <div className="game-card" key={g.id}>
               <div className="top-row">
                 <div className="opp-name">{g.opponent_name}</div>
@@ -296,7 +296,7 @@ export default function App() {
             </div>
           </div>
           <div className="section-head">RECENT GAMES</div>
-          {feed.slice(0, 3).map((p) => (
+          {myGames.slice(0, 3).map((p) => (
             <div className="game-card" key={p.id}>
               <div className="top-row">
                 <div className="opp-name">vs {p.opponent_name}</div>
@@ -329,12 +329,15 @@ export default function App() {
             <h2>SET THE TRICK</h2>
             <div className="field">
               <label>CALL OUT</label>
-              <select value={opp} onChange={e => setOpp(e.target.value)}>
-                <option>@leo_ollies (Berlin)</option>
-                <option>@ren_switch (Tokyo)</option>
-                <option>@fifi_flips (São Paulo)</option>
-                <option>@dtown_dana (LA)</option>
-              </select>
+              {players.length === 0 ? (
+                <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No other players have signed up yet.</div>
+              ) : (
+                <select value={selectedOpponent} onChange={e => setSelectedOpponent(e.target.value)}>
+                  {players.map(p => (
+                    <option key={p.id} value={p.id}>{p.username}</option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="field">
               <label>YOUR TRICK</label>
@@ -346,7 +349,7 @@ export default function App() {
             </div>
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setModalOpen(false)}>CANCEL</button>
-              <button className="btn-submit" onClick={createGame}>POST CALLOUT</button>
+              <button className="btn-submit" onClick={createGame} disabled={players.length === 0}>POST CALLOUT</button>
             </div>
           </div>
         </div>
