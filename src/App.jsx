@@ -388,9 +388,20 @@ export default function App() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
           FEED
         </button>
-        <button className={`navbtn ${screen === 'play' ? 'active' : ''}`} onClick={() => setScreen('play')}>
+        <button className={`navbtn ${screen === 'play' ? 'active' : ''}`} onClick={() => setScreen('play')} style={{ position: 'relative' }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           PLAY
+          {myGames.filter(g => !g.finished).length > 0 && (
+            <span style={{
+              position: 'absolute', top: 2, right: '28%',
+              background: 'var(--tag)', color: '#fff',
+              fontSize: 10, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
+              borderRadius: '50%', width: 16, height: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              {myGames.filter(g => !g.finished).length}
+            </span>
+          )}
         </button>
         <button className={`navbtn ${screen === 'profile' ? 'active' : ''}`} onClick={() => setScreen('profile')}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
