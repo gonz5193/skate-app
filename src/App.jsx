@@ -166,10 +166,24 @@ export default function App() {
   }
 
   async function resolveAttempt(game, landed) {
-    if (landed) return
+    if (landed || game.finished) return
+
     const newLetters = Math.min(5, game.self_letters + 1)
-    setFeed(feed.map(p => p.id === game.id ? { ...p, self_letters: newLetters } : p))
-    const { error } = await supabase.from('games').update({ self_letters: newLetters }).eq('id', game.id)
+    const isFinished = newLetters >= 5
+
+    // The person attempting the trick is the challenger, since "YOUR MOVE" shows
+    // games where you're responding to the set trick. If they spell SKATE, they lose,
+    // so the other player (opponent) is the winner.
+    const winnerId = isFinished ? game.opponent_id : null
+
+    const updates = {
+      self_letters: newLetters,
+      finished: isFinished,
+      winner_id: winnerId
+    }
+
+    setFeed(feed.map(p => p.id === game.id ? { ...p, ...updates } : p))
+    const { error } = await supabase.from('games').update(updates).eq('id', game.id)
     if (error) console.error('Error updating letters:', error)
   }
 
@@ -205,6 +219,7 @@ export default function App() {
       .from('games')
       .insert([{
         challenger_id: session.user.id,
+        challenger_name: displayName, 
         opponent_id: opponentProfile.id,
         opponent_name: opponentProfile.username,
         spot: spot || 'Local spot',
@@ -212,7 +227,8 @@ export default function App() {
         self_letters: 0,
         opp_letters: 0,
         likes: 0,
-        video_url: videoUrl
+        video_url: videoUrl,
+        finished: false
       }])
       .select()
 
@@ -234,14 +250,27 @@ export default function App() {
   if (authLoading) return <div className="app" style={{ minHeight: '100vh' }} />
   if (!session) return <AuthScreen onAuthed={() => {}} />
 
+  const myId = session.user.id
   const displayName = session.user.user_metadata?.username || session.user.email.split('@')[0]
-  const myGames = feed.filter(g => g.challenger_id === session.user.id || g.opponent_id === session.user.id)
+  const myGames = feed.filter(g => g.challenger_id === myId || g.opponent_id === myId)
+
+  const finishedGames = myGames.filter(g => g.finished)
+  const wins = finishedGames.filter(g => g.winner_id === myId).length
+  const losses = finishedGames.filter(g => g.winner_id && g.winner_id !== myId).length
+
+  // Streak = consecutive wins counting from most recent finished game backwards
+  const sortedFinished = [...finishedGames].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  let streak = 0
+  for (const g of sortedFinished) {
+    if (g.winner_id === myId) streak++
+    else break
+  }
 
   return (
     <div className="app">
       <div className="topbar">
         <div className="wordmark"><span>SKATE</span><span>.</span></div>
-        <div className="streak-pill">🔥 6 game streak</div>
+        <div className="streak-pill">🔥 {streak} game streak</div>
       </div>
 
       {screen === 'feed' && (
@@ -271,17 +300,23 @@ export default function App() {
                   <div className="trick-tag">{p.trick}</div>
                 </div>
               )}
+              {p.finished && (
+                <div style={{ padding: '8px 14px', background: 'var(--panel-raised)', fontFamily: "'Anton',sans-serif", fontSize: 12, color: 'var(--wheel)' }}>
+                  GAME OVER
+                </div>
+              )}
               <div className="vs-row">
                 <div className="vs-side">
-                  <div className="vs-name">{(p.opponent_name || '').split(' ')[0].toUpperCase()}</div>
+                  <div className="vs-name">{(p.challenger_name || 'CHALLENGER').toUpperCase()}</div>
                   <LetterTrack count={p.self_letters} />
                 </div>
                 <div className="vs-mid">VS</div>
                 <div className="vs-side" style={{ alignItems: 'flex-end' }}>
-                  <div className="vs-name">CHALLENGER</div>
+                  <div className="vs-name">{(p.opponent_name || '').toUpperCase()}</div>
                   <LetterTrack count={p.opp_letters} />
                 </div>
               </div>
+                  
               <div className="feed-actions">
                 <button className="action-btn" onClick={() => toggleLike(p)}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
@@ -297,10 +332,10 @@ export default function App() {
         <div className="screen">
           <button className="new-game-btn" onClick={() => setModalOpen(true)}>+ CALL OUT SOMEONE NEW</button>
           <div className="section-head">YOUR MOVE</div>
-          {myGames.length === 0 && (
+          {myGames.filter(g => !g.finished).length === 0 && (
             <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games yet. Call someone out above.</div>
           )}
-          {myGames.map((g) => (
+          {myGames.filter(g => !g.finished).map((g) => (
             <div className="game-card" key={g.id}>
               <div className="top-row">
                 <div className="opp-name">{g.opponent_name}</div>
@@ -323,16 +358,23 @@ export default function App() {
             <div className="name">{displayName.toUpperCase()}</div>
             <div className="handle">{session.user.email}</div>
             <div className="stat-row">
-              <div className="stat win"><div className="num">0</div><div className="lbl">WINS</div></div>
-              <div className="stat loss"><div className="num">0</div><div className="lbl">LOSSES</div></div>
-              <div className="stat"><div className="num">0</div><div className="lbl">STREAK</div></div>
+              <div className="stat win"><div className="num">{wins}</div><div className="lbl">WINS</div></div>
+              <div className="stat loss"><div className="num">{losses}</div><div className="lbl">LOSSES</div></div>
+              <div className="stat"><div className="num">{streak}</div><div className="lbl">STREAK</div></div>
             </div>
           </div>
           <div className="section-head">RECENT GAMES</div>
-          {myGames.slice(0, 3).map((p) => (
+          {myGames.slice(0, 5).map((p) => (
             <div className="game-card" key={p.id}>
               <div className="top-row">
-                <div className="opp-name">vs {p.opponent_name}</div>
+                <div className="opp-name">
+                  vs {p.opponent_name}
+                  {p.finished && (
+                    <span style={{ marginLeft: 8, fontSize: 11, color: p.winner_id === myId ? 'var(--ok)' : 'var(--tag)' }}>
+                      {p.winner_id === myId ? 'WON' : 'LOST'}
+                    </span>
+                  )}
+                </div>
                 <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--bone-dim)' }}>{timeAgo(p.created_at)} ago</div>
               </div>
             </div>
