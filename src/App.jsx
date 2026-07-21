@@ -101,7 +101,8 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [screen, setScreen] = useState('feed')
   const [feed, setFeed] = useState([])
-  const [players, setPlayers] = useState([])
+  const [allPlayers, setAllPlayers] = useState([])
+  const [friendships, setFriendships] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedOpponent, setSelectedOpponent] = useState('')
@@ -124,21 +125,29 @@ export default function App() {
   useEffect(() => {
     if (session) {
       fetchGames()
-      fetchPlayers()
+      fetchAllPlayers()
+      fetchFriendships()
     }
   }, [session])
 
-  async function fetchPlayers() {
+  async function fetchAllPlayers() {
     const { data, error } = await supabase
       .from('profiles')
       .select('id, username')
       .neq('id', session.user.id)
 
     if (error) console.error('Error fetching players:', error)
-    else {
-      setPlayers(data)
-      if (data.length > 0) setSelectedOpponent(data[0].id)
-    }
+    else setAllPlayers(data)
+  }
+
+  async function fetchFriendships() {
+    const { data, error } = await supabase
+      .from('friendships')
+      .select('*')
+      .or(`requester_id.eq.${session.user.id},addressee_id.eq.${session.user.id}`)
+
+    if (error) console.error('Error fetching friendships:', error)
+    else setFriendships(data)
   }
 
   async function fetchGames() {
@@ -167,28 +176,42 @@ export default function App() {
 
   async function resolveAttempt(game, landed) {
     if (landed || game.finished) return
-
     const newLetters = Math.min(5, game.self_letters + 1)
     const isFinished = newLetters >= 5
-
-    // The person attempting the trick is the challenger, since "YOUR MOVE" shows
-    // games where you're responding to the set trick. If they spell SKATE, they lose,
-    // so the other player (opponent) is the winner.
     const winnerId = isFinished ? game.opponent_id : null
-
-    const updates = {
-      self_letters: newLetters,
-      finished: isFinished,
-      winner_id: winnerId
-    }
-
+    const updates = { self_letters: newLetters, finished: isFinished, winner_id: winnerId }
     setFeed(feed.map(p => p.id === game.id ? { ...p, ...updates } : p))
     const { error } = await supabase.from('games').update(updates).eq('id', game.id)
     if (error) console.error('Error updating letters:', error)
   }
 
+  async function sendFriendRequest(targetId) {
+    const { data, error } = await supabase
+      .from('friendships')
+      .insert([{ requester_id: session.user.id, addressee_id: targetId, status: 'pending' }])
+      .select()
+
+    if (error) console.error('Error sending friend request:', error)
+    else setFriendships([...friendships, data[0]])
+  }
+
+  async function respondToRequest(friendshipId, accept) {
+    if (accept) {
+      const { error } = await supabase
+        .from('friendships')
+        .update({ status: 'accepted' })
+        .eq('id', friendshipId)
+      if (error) { console.error('Error accepting request:', error); return }
+      setFriendships(friendships.map(f => f.id === friendshipId ? { ...f, status: 'accepted' } : f))
+    } else {
+      const { error } = await supabase.from('friendships').delete().eq('id', friendshipId)
+      if (error) { console.error('Error declining request:', error); return }
+      setFriendships(friendships.filter(f => f.id !== friendshipId))
+    }
+  }
+
   async function createGame() {
-    const opponentProfile = players.find(p => p.id === selectedOpponent)
+    const opponentProfile = allPlayers.find(p => p.id === selectedOpponent)
     if (!opponentProfile) return
 
     setUploading(true)
@@ -197,21 +220,13 @@ export default function App() {
     if (videoFile) {
       const fileExt = videoFile.name.split('.').pop()
       const fileName = `${session.user.id}-${Date.now()}.${fileExt}`
-
-      const { error: uploadError } = await supabase.storage
-        .from('trick-clips')
-        .upload(fileName, videoFile)
-
+      const { error: uploadError } = await supabase.storage.from('trick-clips').upload(fileName, videoFile)
       if (uploadError) {
         console.error('Error uploading video:', uploadError)
         setUploading(false)
         return
       }
-
-      const { data: urlData } = supabase.storage
-        .from('trick-clips')
-        .getPublicUrl(fileName)
-
+      const { data: urlData } = supabase.storage.from('trick-clips').getPublicUrl(fileName)
       videoUrl = urlData.publicUrl
     }
 
@@ -219,7 +234,7 @@ export default function App() {
       .from('games')
       .insert([{
         challenger_id: session.user.id,
-        challenger_name: displayName, 
+        challenger_name: displayName,
         opponent_id: opponentProfile.id,
         opponent_name: opponentProfile.username,
         spot: spot || 'Local spot',
@@ -234,10 +249,7 @@ export default function App() {
 
     setUploading(false)
 
-    if (error) {
-      console.error('Error creating game:', error)
-      return
-    }
+    if (error) { console.error('Error creating game:', error); return }
 
     setFeed([data[0], ...feed])
     setTrick('')
@@ -257,14 +269,36 @@ export default function App() {
   const finishedGames = myGames.filter(g => g.finished)
   const wins = finishedGames.filter(g => g.winner_id === myId).length
   const losses = finishedGames.filter(g => g.winner_id && g.winner_id !== myId).length
-
-  // Streak = consecutive wins counting from most recent finished game backwards
   const sortedFinished = [...finishedGames].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   let streak = 0
   for (const g of sortedFinished) {
     if (g.winner_id === myId) streak++
     else break
   }
+
+  // Friends = accepted friendships involving me
+  const acceptedFriendships = friendships.filter(f => f.status === 'accepted')
+  const friendIds = acceptedFriendships.map(f => f.requester_id === myId ? f.addressee_id : f.requester_id)
+  const friends = allPlayers.filter(p => friendIds.includes(p.id))
+
+  // Incoming = pending requests sent TO me
+  const incomingRequests = friendships.filter(f => f.status === 'pending' && f.addressee_id === myId)
+  // Outgoing = pending requests I sent, still waiting
+  const outgoingRequestIds = friendships.filter(f => f.status === 'pending' && f.requester_id === myId).map(f => f.addressee_id)
+
+  // People not yet friends and no pending request either way
+  const nonFriends = allPlayers.filter(p =>
+    !friendIds.includes(p.id) &&
+    !outgoingRequestIds.includes(p.id) &&
+    !incomingRequests.some(r => r.requester_id === p.id)
+  )
+
+  useEffect_setDefaultOpponent()
+  function useEffect_setDefaultOpponent() {
+    if (!selectedOpponent && friends.length > 0) setSelectedOpponent(friends[0].id)
+  }
+
+  const pendingGamesCount = myGames.filter(g => !g.finished).length
 
   return (
     <div className="app">
@@ -316,7 +350,6 @@ export default function App() {
                   <LetterTrack count={p.opp_letters} />
                 </div>
               </div>
-                  
               <div className="feed-actions">
                 <button className="action-btn" onClick={() => toggleLike(p)}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
@@ -346,6 +379,55 @@ export default function App() {
                 <button className="btn btn-land" onClick={() => resolveAttempt(g, true)}>LANDED IT</button>
                 <button className="btn btn-miss" onClick={() => resolveAttempt(g, false)}>MISSED</button>
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {screen === 'friends' && (
+        <div className="screen">
+          {incomingRequests.length > 0 && (
+            <>
+              <div className="section-head">FRIEND REQUESTS</div>
+              {incomingRequests.map(r => {
+                const requesterProfile = allPlayers.find(p => p.id === r.requester_id)
+                return (
+                  <div className="game-card" key={r.id}>
+                    <div className="top-row">
+                      <div className="opp-name">{requesterProfile?.username || 'Unknown'}</div>
+                    </div>
+                    <div className="game-buttons">
+                      <button className="btn btn-land" onClick={() => respondToRequest(r.id, true)}>ACCEPT</button>
+                      <button className="btn btn-miss" onClick={() => respondToRequest(r.id, false)}>DECLINE</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </>
+          )}
+
+          <div className="section-head">YOUR FRIENDS</div>
+          {friends.length === 0 && (
+            <div style={{ color: 'var(--bone-dim)', fontSize: 13, marginBottom: 20 }}>No friends yet. Add some below.</div>
+          )}
+          {friends.map(f => (
+            <div className="feed-card-head" key={f.id} style={{ padding: '10px 4px' }}>
+              <div className="avatar" style={{ background: colorFor(f.username), color: '#fff' }}>{initials(f.username)}</div>
+              <div className="who"><div className="name">{f.username}</div></div>
+            </div>
+          ))}
+
+          <div className="section-head" style={{ marginTop: 24 }}>ADD FRIENDS</div>
+          {nonFriends.length === 0 && (
+            <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No one new to add right now.</div>
+          )}
+          {nonFriends.map(p => (
+            <div className="feed-card-head" key={p.id} style={{ padding: '10px 4px' }}>
+              <div className="avatar" style={{ background: colorFor(p.username), color: '#fff' }}>{initials(p.username)}</div>
+              <div className="who"><div className="name">{p.username}</div></div>
+              <button className="action-btn" style={{ background: 'var(--wheel)', color: '#1a1200', padding: '6px 12px', borderRadius: 6, fontFamily: "'Anton',sans-serif" }} onClick={() => sendFriendRequest(p.id)}>
+                ADD
+              </button>
             </div>
           ))}
         </div>
@@ -391,15 +473,30 @@ export default function App() {
         <button className={`navbtn ${screen === 'play' ? 'active' : ''}`} onClick={() => setScreen('play')} style={{ position: 'relative' }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           PLAY
-          {myGames.filter(g => !g.finished).length > 0 && (
+          {pendingGamesCount > 0 && (
             <span style={{
-              position: 'absolute', top: 2, right: '28%',
+              position: 'absolute', top: 2, right: '20%',
               background: 'var(--tag)', color: '#fff',
               fontSize: 10, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
               borderRadius: '50%', width: 16, height: 16,
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
-              {myGames.filter(g => !g.finished).length}
+              {pendingGamesCount}
+            </span>
+          )}
+        </button>
+        <button className={`navbtn ${screen === 'friends' ? 'active' : ''}`} onClick={() => setScreen('friends')} style={{ position: 'relative' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          FRIENDS
+          {incomingRequests.length > 0 && (
+            <span style={{
+              position: 'absolute', top: 2, right: '15%',
+              background: 'var(--tag)', color: '#fff',
+              fontSize: 10, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
+              borderRadius: '50%', width: 16, height: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              {incomingRequests.length}
             </span>
           )}
         </button>
@@ -415,11 +512,11 @@ export default function App() {
             <h2>SET THE TRICK</h2>
             <div className="field">
               <label>CALL OUT</label>
-              {players.length === 0 ? (
-                <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No other players have signed up yet.</div>
+              {friends.length === 0 ? (
+                <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Add friends first before calling someone out.</div>
               ) : (
                 <select value={selectedOpponent} onChange={e => setSelectedOpponent(e.target.value)}>
-                  {players.map(p => (
+                  {friends.map(p => (
                     <option key={p.id} value={p.id}>{p.username}</option>
                   ))}
                 </select>
@@ -439,7 +536,7 @@ export default function App() {
             </div>
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setModalOpen(false)}>CANCEL</button>
-              <button className="btn-submit" onClick={createGame} disabled={players.length === 0 || uploading}>
+              <button className="btn-submit" onClick={createGame} disabled={friends.length === 0 || uploading}>
                 {uploading ? 'UPLOADING…' : 'POST CALLOUT'}
               </button>
             </div>
