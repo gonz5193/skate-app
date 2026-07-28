@@ -76,11 +76,21 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
   function startRecording() {
     if (!streamRef.current) return
     chunksRef.current = []
-    const recorder = new MediaRecorder(streamRef.current)
+
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4')
+      ? 'video/mp4'
+      : MediaRecorder.isTypeSupported('video/webm')
+      ? 'video/webm'
+      : ''
+
+    const recorder = mimeType ? new MediaRecorder(streamRef.current, { mimeType }) : new MediaRecorder(streamRef.current)
+    const actualType = recorder.mimeType || 'video/webm'
+    const ext = actualType.includes('mp4') ? 'mp4' : 'webm'
+
     recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data) }
     recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: 'video/webm' })
-      const file = new File([blob], `clip-${Date.now()}.webm`, { type: 'video/webm' })
+      const blob = new Blob(chunksRef.current, { type: actualType })
+      const file = new File([blob], `clip-${Date.now()}.${ext}`, { type: actualType })
       setPreviewUrl(URL.createObjectURL(blob))
       setStatus('done')
       onCapture(file)
