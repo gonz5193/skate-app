@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
 import { supabase } from './supabaseClient'
 
@@ -23,6 +23,119 @@ function LetterTrack({ count }) {
   return (
     <div className="skate-track">
       {word.map((l,i) => <div key={i} className={`skate-letter ${i < count ? 'filled' : ''}`}>{l}</div>)}
+    </div>
+  )
+}
+
+function CameraRecorder({ onCapture, seconds = 20 }) {
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
+  const recorderRef = useRef(null)
+  const chunksRef = useRef([])
+  const [status, setStatus] = useState('loading') // loading | ready | countdown | recording | done | error
+  const [countdown, setCountdown] = useState(3)
+  const [timeLeft, setTimeLeft] = useState(seconds)
+  const [previewUrl, setPreviewUrl] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function setup() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
+        streamRef.current = stream
+        if (videoRef.current) videoRef.current.srcObject = stream
+        setStatus('ready')
+      } catch (err) {
+        console.error('Camera error:', err)
+        setStatus('error')
+      }
+    }
+    setup()
+    return () => {
+      cancelled = true
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
+    }
+  }, [])
+
+  function beginCountdown() {
+    setStatus('countdown')
+    setCountdown(3)
+    const tick = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) {
+          clearInterval(tick)
+          startRecording()
+          return 0
+        }
+        return c - 1
+      })
+    }, 1000)
+  }
+
+  function startRecording() {
+    if (!streamRef.current) return
+    chunksRef.current = []
+    const recorder = new MediaRecorder(streamRef.current)
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+      const file = new File([blob], `clip-${Date.now()}.webm`, { type: 'video/webm' })
+      setPreviewUrl(URL.createObjectURL(blob))
+      setStatus('done')
+      onCapture(file)
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
+    }
+    recorderRef.current = recorder
+    recorder.start()
+    setStatus('recording')
+    setTimeLeft(seconds)
+    const interval = setInterval(() => {
+      setTimeLeft(t => {
+        if (t <= 1) {
+          clearInterval(interval)
+          recorder.stop()
+          return 0
+        }
+        return t - 1
+      })
+    }, 1000)
+  }
+
+  if (status === 'error') {
+    return <div style={{ color: 'var(--tag)', fontSize: 13 }}>Couldn't access your camera. Check permissions and try again.</div>
+  }
+  if (status === 'loading') {
+    return <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Requesting camera access…</div>
+  }
+
+  return (
+    <div>
+      {status !== 'done' ? (
+        <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', borderRadius: 8, background: '#000' }} />
+      ) : (
+        <video src={previewUrl} controls style={{ width: '100%', borderRadius: 8, background: '#000' }} />
+      )}
+      {status === 'ready' && (
+        <button className="btn-submit" style={{ width: '100%', marginTop: 10 }} onClick={beginCountdown}>
+          ● START RECORDING ({seconds}s, no retakes)
+        </button>
+      )}
+      {status === 'countdown' && (
+        <div style={{ marginTop: 10, textAlign: 'center', color: 'var(--wheel)', fontFamily: "'Anton',sans-serif", fontSize: 40 }}>
+          {countdown}
+        </div>
+      )}
+      {status === 'recording' && (
+        <div style={{ marginTop: 10, textAlign: 'center', color: 'var(--tag)', fontFamily: "'Anton',sans-serif", fontSize: 20 }}>
+          ● RECORDING — {timeLeft}s
+        </div>
+      )}
+      {status === 'done' && (
+        <div style={{ marginTop: 10, textAlign: 'center', color: 'var(--ok)', fontSize: 13 }}>
+          Clip captured — ready to post
+        </div>
+      )}
     </div>
   )
 }
@@ -78,7 +191,6 @@ function AuthScreen({ onAuthed }) {
   )
 }
 
-// Modal for posting a clip in response to an existing game (a "turn")
 function ClipModal({ game, onClose, onSubmit, uploading }) {
   const [file, setFile] = useState(null)
   const [landed, setLanded] = useState(null)
@@ -98,8 +210,8 @@ function ClipModal({ game, onClose, onSubmit, uploading }) {
           </div>
         </div>
         <div className="field">
-          <label>VIDEO CLIP (required)</label>
-          <input type="file" accept="video/*" onChange={e => setFile(e.target.files[0])} />
+          <label>FILM YOUR ATTEMPT</label>
+          <CameraRecorder onCapture={setFile} />
         </div>
         <div className="modal-actions">
           <button className="btn-cancel" onClick={onClose}>CANCEL</button>
@@ -112,7 +224,6 @@ function ClipModal({ game, onClose, onSubmit, uploading }) {
   )
 }
 
-// Full clip history thread for a match
 function ClipThread({ game, clips, onClose }) {
   return (
     <div className="modal-backdrop">
@@ -142,7 +253,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [screen, setScreen] = useState('feed')
   const [feed, setFeed] = useState([])
-  const [clipsByGame, setClipsByGame] = useState({}) // { gameId: [clips] }
+  const [clipsByGame, setClipsByGame] = useState({})
   const [allPlayers, setAllPlayers] = useState([])
   const [friendships, setFriendships] = useState([])
   const [loading, setLoading] = useState(true)
@@ -152,8 +263,8 @@ export default function App() {
   const [spot, setSpot] = useState('')
   const [videoFile, setVideoFile] = useState(null)
   const [uploading, setUploading] = useState(false)
-  const [respondingTo, setRespondingTo] = useState(null) // game object
-  const [viewingThread, setViewingThread] = useState(null) // game object
+  const [respondingTo, setRespondingTo] = useState(null)
+  const [viewingThread, setViewingThread] = useState(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false) })
@@ -218,7 +329,6 @@ export default function App() {
     return data.publicUrl
   }
 
-  // Called from the ClipModal when responding to an existing game
   async function submitClip(landed, file) {
     const game = respondingTo
     setUploading(true)
@@ -311,10 +421,8 @@ export default function App() {
 
   const pendingGamesCount = myGames.filter(g => {
     if (g.finished) return false
-    const isChallenger = g.challenger_id === myId
     const clips = clipsByGame[g.id] || []
     const lastClip = clips[clips.length - 1]
-    // It's your move if the last clip wasn't posted by you (opponent just went, or nobody has gone since your callout)
     return !lastClip || lastClip.player_id !== myId
   }).length
 
@@ -525,8 +633,8 @@ export default function App() {
             <div className="field"><label>SPOT</label>
               <input type="text" value={spot} onChange={e => setSpot(e.target.value)} placeholder="e.g. Locals Only skatepark" />
             </div>
-            <div className="field"><label>VIDEO CLIP (required)</label>
-              <input type="file" accept="video/*" onChange={e => setVideoFile(e.target.files[0])} />
+            <div className="field"><label>FILM YOUR CALLOUT</label>
+              <CameraRecorder onCapture={setVideoFile} />
             </div>
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setModalOpen(false)}>CANCEL</button>
