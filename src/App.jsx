@@ -44,7 +44,12 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
         streamRef.current = stream
-        if (videoRef.current) videoRef.current.srcObject = stream
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.muted = true
+          videoRef.current.playsInline = true
+          videoRef.current.play().catch(err => console.error('Preview play error:', err))
+        }
         setStatus('ready')
       } catch (err) {
         console.error('Camera error:', err)
