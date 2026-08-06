@@ -236,11 +236,16 @@ function ClipModal({ game, onClose, onSubmit, uploading }) {
           <CameraRecorder onCapture={setFile} />
         </div>
         <div className="modal-actions">
-          <button className="btn-cancel" onClick={onClose}>CANCEL</button>
+          <button className="btn-cancel" onClick={onClose} disabled={uploading}>CANCEL</button>
           <button className="btn-submit" disabled={landed === null || !file || uploading} onClick={() => onSubmit(landed, file)}>
             {uploading ? 'UPLOADING…' : 'POST CLIP'}
           </button>
         </div>
+        {uploading && (
+          <div style={{ marginTop: 14, textAlign: 'center', color: 'var(--wheel)', fontSize: 13 }}>
+            Uploading your clip — this can take a moment on mobile data. Don't close the app.
+          </div>
+        )}
       </div>
     </div>
   )
@@ -659,11 +664,16 @@ export default function App() {
               <CameraRecorder onCapture={setVideoFile} />
             </div>
             <div className="modal-actions">
-              <button className="btn-cancel" onClick={() => setModalOpen(false)}>CANCEL</button>
+              <button className="btn-cancel" onClick={() => setModalOpen(false)} disabled={uploading}>CANCEL</button>
               <button className="btn-submit" onClick={createGame} disabled={friends.length === 0 || uploading || !videoFile}>
                 {uploading ? 'UPLOADING…' : 'POST CALLOUT'}
               </button>
             </div>
+            {uploading && (
+              <div style={{ marginTop: 14, textAlign: 'center', color: 'var(--wheel)', fontSize: 13 }}>
+                Uploading your clip — this can take a moment on mobile data. Don't close the app.
+              </div>
+            )}
           </div>
         </div>
       )}
