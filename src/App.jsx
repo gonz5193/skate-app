@@ -32,11 +32,11 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
   const streamRef = useRef(null)
   const recorderRef = useRef(null)
   const chunksRef = useRef([])
-  const [status, setStatus] = useState('loading') // loading | ready | countdown | recording | done | error
-  const [facingMode, setFacingMode] = useState('environment') // 'user' = selfie, 'environment' = back camera
+  const [status, setStatus] = useState('loading')
   const [countdown, setCountdown] = useState(3)
   const [timeLeft, setTimeLeft] = useState(seconds)
   const [previewUrl, setPreviewUrl] = useState(null)
+  const [facingMode, setFacingMode] = useState('environment')
 
   useEffect(() => {
     let cancelled = false
@@ -45,18 +45,13 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true })
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
         streamRef.current = stream
-        console.log('Stream tracks:', stream.getVideoTracks())
         setStatus('ready')
         setTimeout(() => {
           if (videoRef.current) {
             videoRef.current.muted = true
             videoRef.current.playsInline = true
             videoRef.current.srcObject = stream
-            videoRef.current.play()
-              .then(() => console.log('Video playing successfully'))
-              .catch(err => console.error('Preview play error:', err.name, err.message))
-          } else {
-            console.error('videoRef.current is null!')
+            videoRef.current.play().catch(err => console.error('Preview play error:', err.name, err.message))
           }
         }, 100)
       } catch (err) {
@@ -76,11 +71,7 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
     setCountdown(3)
     const tick = setInterval(() => {
       setCountdown(c => {
-        if (c <= 1) {
-          clearInterval(tick)
-          startRecording()
-          return 0
-        }
+        if (c <= 1) { clearInterval(tick); startRecording(); return 0 }
         return c - 1
       })
     }, 1000)
@@ -89,17 +80,11 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
   function startRecording() {
     if (!streamRef.current) return
     chunksRef.current = []
-
-    const mimeType = MediaRecorder.isTypeSupported('video/mp4')
-      ? 'video/mp4'
-      : MediaRecorder.isTypeSupported('video/webm')
-      ? 'video/webm'
-      : ''
-
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4'
+      : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : ''
     const recorder = mimeType ? new MediaRecorder(streamRef.current, { mimeType }) : new MediaRecorder(streamRef.current)
     const actualType = recorder.mimeType || 'video/webm'
     const ext = actualType.includes('mp4') ? 'mp4' : 'webm'
-
     recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data) }
     recorder.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: actualType })
@@ -115,65 +100,52 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
     setTimeLeft(seconds)
     const interval = setInterval(() => {
       setTimeLeft(t => {
-        if (t <= 1) {
-          clearInterval(interval)
-          recorder.stop()
-          return 0
-        }
+        if (t <= 1) { clearInterval(interval); recorder.stop(); return 0 }
         return t - 1
       })
     }, 1000)
   }
 
   if (status === 'error') {
-    return <div style={{ color: 'var(--tag)', fontSize: 13 }}>Couldn't access your camera. Check permissions and try again.</div>
+    return <div style={{ color: 'var(--tag)', fontSize: 14, padding: 20 }}>Couldn't access your camera. Check permissions and try again.</div>
   }
   if (status === 'loading') {
-    return <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Requesting camera access…</div>
+    return <div style={{ color: 'var(--bone-dim)', fontSize: 14, padding: 20 }}>Requesting camera access…</div>
   }
 
   return (
-    <div>
-      {status !== 'done' ? (
-        <div style={{ position: 'relative' }}>
-          <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', borderRadius: 8, background: '#000' }} />
-          {status === 'ready' && (
-            <button
-              onClick={() => setFacingMode(f => f === 'user' ? 'environment' : 'user')}
-              style={{
-                position: 'absolute', top: 10, right: 10,
-                background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.4)',
-                borderRadius: '50%', width: 40, height: 40, color: '#fff',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            </button>
-          )}
-        </div>
-      ) : (
-        <video src={previewUrl} controls style={{ width: '100%', borderRadius: 8, background: '#000' }} />
-      )}
-      {status === 'ready' && (
-        <button className="btn-submit" style={{ width: '100%', marginTop: 10 }} onClick={beginCountdown}>
-          ● START RECORDING ({seconds}s, no retakes)
-        </button>
-      )}
-      {status === 'countdown' && (
-        <div style={{ marginTop: 10, textAlign: 'center', color: 'var(--wheel)', fontFamily: "'Anton',sans-serif", fontSize: 40 }}>
-          {countdown}
-        </div>
-      )}
-      {status === 'recording' && (
-        <div style={{ marginTop: 10, textAlign: 'center', color: 'var(--tag)', fontFamily: "'Anton',sans-serif", fontSize: 20 }}>
-          ● RECORDING — {timeLeft}s
-        </div>
-      )}
-      {status === 'done' && (
-        <div style={{ marginTop: 10, textAlign: 'center', color: 'var(--ok)', fontSize: 13 }}>
-          Clip captured — ready to post
-        </div>
-      )}
+    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 100, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, position: 'relative' }}>
+        {status !== 'done' ? (
+          <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <video src={previewUrl} controls style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        )}
+        {status === 'ready' && (
+          <button onClick={() => setFacingMode(f => f === 'user' ? 'environment' : 'user')} style={{
+            position: 'absolute', top: 16, right: 16, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.4)',
+            borderRadius: '50%', width: 44, height: 44, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+        )}
+        {status === 'countdown' && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--wheel)', fontFamily: "'Anton',sans-serif", fontSize: 100 }}>{countdown}</div>
+        )}
+        {status === 'recording' && (
+          <div style={{ position: 'absolute', top: 16, left: 16, background: 'rgba(0,0,0,0.6)', padding: '8px 14px', borderRadius: 20, color: 'var(--tag)', fontFamily: "'Anton',sans-serif", fontSize: 16 }}>
+            ● REC {timeLeft}s
+          </div>
+        )}
+      </div>
+      <div style={{ padding: 18, background: 'var(--panel-raised)' }}>
+        {status === 'ready' && (
+          <button className="btn-submit" style={{ width: '100%' }} onClick={beginCountdown}>● START RECORDING ({seconds}s, no retakes)</button>
+        )}
+        {status === 'countdown' && <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 13 }}>Get ready…</div>}
+        {status === 'recording' && <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 13 }}>Recording — no way to stop early</div>}
+        {status === 'done' && <div style={{ textAlign: 'center', color: 'var(--ok)', fontSize: 13 }}>Clip captured! Tap continue below.</div>}
+      </div>
     </div>
   )
 }
@@ -229,9 +201,78 @@ function AuthScreen({ onAuthed }) {
   )
 }
 
-function ClipModal({ game, onClose, onSubmit, uploading }) {
+// Two-step: details form, then full-screen camera
+function CallOutFlow({ friends, uploading, onCancel, onSubmit }) {
+  const [step, setStep] = useState('details') // details | camera
+  const [selectedOpponent, setSelectedOpponent] = useState(friends[0]?.id || '')
+  const [trick, setTrick] = useState('')
+  const [spot, setSpot] = useState('')
   const [file, setFile] = useState(null)
+
+  if (step === 'camera') {
+    return (
+      <>
+        <CameraRecorder onCapture={setFile} />
+        {file && (
+          <div style={{ position: 'fixed', bottom: 100, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 101, padding: '0 18px' }}>
+            <button className="btn-submit" style={{ width: '100%', maxWidth: 430 }} disabled={uploading}
+              onClick={() => onSubmit({ opponentId: selectedOpponent, trick, spot, file })}>
+              {uploading ? 'UPLOADING…' : 'POST CALLOUT'}
+            </button>
+          </div>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>SET THE TRICK</h2>
+        <div className="field">
+          <label>CALL OUT</label>
+          {friends.length === 0 ? <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Add friends first before calling someone out.</div> : (
+            <select value={selectedOpponent} onChange={e => setSelectedOpponent(e.target.value)}>
+              {friends.map(p => <option key={p.id} value={p.id}>{p.username}</option>)}
+            </select>
+          )}
+        </div>
+        <div className="field"><label>YOUR TRICK</label>
+          <input type="text" value={trick} onChange={e => setTrick(e.target.value)} placeholder="e.g. Frontside heelflip" />
+        </div>
+        <div className="field"><label>SPOT</label>
+          <input type="text" value={spot} onChange={e => setSpot(e.target.value)} placeholder="e.g. Locals Only skatepark" />
+        </div>
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onCancel}>CANCEL</button>
+          <button className="btn-submit" disabled={friends.length === 0} onClick={() => setStep('camera')}>CONTINUE TO CAMERA</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Two-step: land/miss form, then full-screen camera
+function ClipFlow({ game, uploading, onCancel, onSubmit }) {
+  const [step, setStep] = useState('details')
   const [landed, setLanded] = useState(null)
+  const [file, setFile] = useState(null)
+
+  if (step === 'camera') {
+    return (
+      <>
+        <CameraRecorder onCapture={setFile} />
+        {file && (
+          <div style={{ position: 'fixed', bottom: 100, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 101, padding: '0 18px' }}>
+            <button className="btn-submit" style={{ width: '100%', maxWidth: 430 }} disabled={uploading}
+              onClick={() => onSubmit(landed, file)}>
+              {uploading ? 'UPLOADING…' : 'POST CLIP'}
+            </button>
+          </div>
+        )}
+      </>
+    )
+  }
 
   return (
     <div className="modal-backdrop">
@@ -247,21 +288,10 @@ function ClipModal({ game, onClose, onSubmit, uploading }) {
             <button className={landed === false ? 'btn-submit' : 'btn-cancel'} style={{ flex: 1 }} onClick={() => setLanded(false)}>MISSED</button>
           </div>
         </div>
-        <div className="field">
-          <label>FILM YOUR ATTEMPT</label>
-          <CameraRecorder onCapture={setFile} />
-        </div>
         <div className="modal-actions">
-          <button className="btn-cancel" onClick={onClose} disabled={uploading}>CANCEL</button>
-          <button className="btn-submit" disabled={landed === null || !file || uploading} onClick={() => onSubmit(landed, file)}>
-            {uploading ? 'UPLOADING…' : 'POST CLIP'}
-          </button>
+          <button className="btn-cancel" onClick={onCancel}>CANCEL</button>
+          <button className="btn-submit" disabled={landed === null} onClick={() => setStep('camera')}>CONTINUE TO CAMERA</button>
         </div>
-        {uploading && (
-          <div style={{ marginTop: 14, textAlign: 'center', color: 'var(--wheel)', fontSize: 13 }}>
-            Uploading your clip — this can take a moment on mobile data. Don't close the app.
-          </div>
-        )}
       </div>
     </div>
   )
@@ -301,10 +331,6 @@ export default function App() {
   const [friendships, setFriendships] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
-  const [selectedOpponent, setSelectedOpponent] = useState('')
-  const [trick, setTrick] = useState('')
-  const [spot, setSpot] = useState('')
-  const [videoFile, setVideoFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [respondingTo, setRespondingTo] = useState(null)
   const [viewingThread, setViewingThread] = useState(null)
@@ -393,11 +419,7 @@ export default function App() {
     if (updateError) { console.error(updateError); setUploading(false); return }
 
     const { error: clipError } = await supabase.from('game_clips').insert([{
-      game_id: game.id,
-      player_id: myId,
-      player_name: displayName,
-      video_url: videoUrl,
-      landed
+      game_id: game.id, player_id: myId, player_name: displayName, video_url: videoUrl, landed
     }])
     if (clipError) console.error(clipError)
 
@@ -407,11 +429,11 @@ export default function App() {
     setRespondingTo(null)
   }
 
-  async function createGame() {
-    const opponentProfile = allPlayers.find(p => p.id === selectedOpponent)
-    if (!opponentProfile || !videoFile) return
+  async function createGame({ opponentId, trick, spot, file }) {
+    const opponentProfile = allPlayers.find(p => p.id === opponentId)
+    if (!opponentProfile || !file) return
     setUploading(true)
-    const videoUrl = await uploadClip(videoFile)
+    const videoUrl = await uploadClip(file)
     if (!videoUrl) { setUploading(false); return }
 
     const { data, error } = await supabase.from('games').insert([{
@@ -429,14 +451,12 @@ export default function App() {
 
     const newGame = data[0]
     const { error: clipError } = await supabase.from('game_clips').insert([{
-      game_id: newGame.id, player_id: session.user.id, player_name: displayName,
-      video_url: videoUrl, landed: true
+      game_id: newGame.id, player_id: session.user.id, player_name: displayName, video_url: videoUrl, landed: true
     }])
     if (clipError) console.error(clipError)
 
     setFeed([newGame, ...feed])
     await fetchClipsForOneGame(newGame.id)
-    setTrick(''); setSpot(''); setVideoFile(null)
     setUploading(false); setModalOpen(false); setScreen('feed')
   }
 
@@ -459,8 +479,6 @@ export default function App() {
   const incomingRequests = friendships.filter(f => f.status === 'pending' && f.addressee_id === myId)
   const outgoingRequestIds = friendships.filter(f => f.status === 'pending' && f.requester_id === myId).map(f => f.addressee_id)
   const nonFriends = allPlayers.filter(p => !friendIds.includes(p.id) && !outgoingRequestIds.includes(p.id) && !incomingRequests.some(r => r.requester_id === p.id))
-
-  if (!selectedOpponent && friends.length > 0) setSelectedOpponent(friends[0].id)
 
   const pendingGamesCount = myGames.filter(g => {
     if (g.finished) return false
@@ -659,43 +677,21 @@ export default function App() {
       </div>
 
       {modalOpen && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h2>SET THE TRICK</h2>
-            <div className="field">
-              <label>CALL OUT</label>
-              {friends.length === 0 ? <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Add friends first before calling someone out.</div> : (
-                <select value={selectedOpponent} onChange={e => setSelectedOpponent(e.target.value)}>
-                  {friends.map(p => <option key={p.id} value={p.id}>{p.username}</option>)}
-                </select>
-              )}
-            </div>
-            <div className="field"><label>YOUR TRICK</label>
-              <input type="text" value={trick} onChange={e => setTrick(e.target.value)} placeholder="e.g. Frontside heelflip" />
-            </div>
-            <div className="field"><label>SPOT</label>
-              <input type="text" value={spot} onChange={e => setSpot(e.target.value)} placeholder="e.g. Locals Only skatepark" />
-            </div>
-            <div className="field"><label>FILM YOUR CALLOUT</label>
-              <CameraRecorder onCapture={setVideoFile} />
-            </div>
-            <div className="modal-actions">
-              <button className="btn-cancel" onClick={() => setModalOpen(false)} disabled={uploading}>CANCEL</button>
-              <button className="btn-submit" onClick={createGame} disabled={friends.length === 0 || uploading || !videoFile}>
-                {uploading ? 'UPLOADING…' : 'POST CALLOUT'}
-              </button>
-            </div>
-            {uploading && (
-              <div style={{ marginTop: 14, textAlign: 'center', color: 'var(--wheel)', fontSize: 13 }}>
-                Uploading your clip — this can take a moment on mobile data. Don't close the app.
-              </div>
-            )}
-          </div>
-        </div>
+        <CallOutFlow
+          friends={friends}
+          uploading={uploading}
+          onCancel={() => setModalOpen(false)}
+          onSubmit={createGame}
+        />
       )}
 
       {respondingTo && (
-        <ClipModal game={respondingTo} uploading={uploading} onClose={() => setRespondingTo(null)} onSubmit={submitClip} />
+        <ClipFlow
+          game={respondingTo}
+          uploading={uploading}
+          onCancel={() => setRespondingTo(null)}
+          onSubmit={submitClip}
+        />
       )}
 
       {viewingThread && (
