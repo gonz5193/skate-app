@@ -33,7 +33,7 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
   const recorderRef = useRef(null)
   const chunksRef = useRef([])
   const [status, setStatus] = useState('loading') // loading | ready | countdown | recording | done | error
-  const [facingMode, setFacingMode] = useState('user') // 'user' = selfie, 'environment' = back camera
+  const [facingMode, setFacingMode] = useState('environment') // 'user' = selfie, 'environment' = back camera
   const [countdown, setCountdown] = useState(3)
   const [timeLeft, setTimeLeft] = useState(seconds)
   const [previewUrl, setPreviewUrl] = useState(null)
