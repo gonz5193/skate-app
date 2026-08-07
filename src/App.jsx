@@ -33,6 +33,7 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
   const recorderRef = useRef(null)
   const chunksRef = useRef([])
   const [status, setStatus] = useState('loading') // loading | ready | countdown | recording | done | error
+  const [facingMode, setFacingMode] = useState('user') // 'user' = selfie, 'environment' = back camera
   const [countdown, setCountdown] = useState(3)
   const [timeLeft, setTimeLeft] = useState(seconds)
   const [previewUrl, setPreviewUrl] = useState(null)
@@ -41,7 +42,7 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
     let cancelled = false
     async function setup() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true })
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
         streamRef.current = stream
         console.log('Stream tracks:', stream.getVideoTracks())
@@ -68,7 +69,7 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
       cancelled = true
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
     }
-  }, [])
+  }, [facingMode])
 
   function beginCountdown() {
     setStatus('countdown')
@@ -134,7 +135,22 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
   return (
     <div>
       {status !== 'done' ? (
-        <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', borderRadius: 8, background: '#000' }} />
+        <div style={{ position: 'relative' }}>
+          <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', borderRadius: 8, background: '#000' }} />
+          {status === 'ready' && (
+            <button
+              onClick={() => setFacingMode(f => f === 'user' ? 'environment' : 'user')}
+              style={{
+                position: 'absolute', top: 10, right: 10,
+                background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.4)',
+                borderRadius: '50%', width: 40, height: 40, color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+          )}
+        </div>
       ) : (
         <video src={previewUrl} controls style={{ width: '100%', borderRadius: 8, background: '#000' }} />
       )}
