@@ -201,9 +201,8 @@ function AuthScreen({ onAuthed }) {
   )
 }
 
-// Two-step: details form, then full-screen camera
 function CallOutFlow({ friends, uploading, onCancel, onSubmit }) {
-  const [step, setStep] = useState('details') // details | camera
+  const [step, setStep] = useState('details')
   const [selectedOpponent, setSelectedOpponent] = useState(friends[0]?.id || '')
   const [trick, setTrick] = useState('')
   const [spot, setSpot] = useState('')
@@ -252,7 +251,6 @@ function CallOutFlow({ friends, uploading, onCancel, onSubmit }) {
   )
 }
 
-// Two-step: land/miss form, then full-screen camera
 function ClipFlow({ game, uploading, onCancel, onSubmit }) {
   const [step, setStep] = useState('details')
   const [landed, setLanded] = useState(null)
@@ -375,8 +373,8 @@ export default function App() {
   const [uploading, setUploading] = useState(false)
   const [respondingTo, setRespondingTo] = useState(null)
   const [viewingThread, setViewingThread] = useState(null)
-  const [redoVotes, setRedoVotes] = useState({}) // { gameId: voteObject }
-  const [myBallots, setMyBallots] = useState({}) // { voteId: choice }
+  const [redoVotes, setRedoVotes] = useState({})
+  const [myBallots, setMyBallots] = useState({})
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false) })
@@ -407,6 +405,22 @@ export default function App() {
     await fetchClipsForGames(data.map(g => g.id))
     setLoading(false)
   }
+
+  async function fetchClipsForGames(gameIds) {
+    if (gameIds.length === 0) return
+    const { data, error } = await supabase.from('game_clips').select('*').in('game_id', gameIds).order('created_at', { ascending: true })
+    if (error) { console.error(error); return }
+    const grouped = {}
+    data.forEach(c => { grouped[c.game_id] = grouped[c.game_id] || []; grouped[c.game_id].push(c) })
+    setClipsByGame(grouped)
+  }
+
+  async function fetchClipsForOneGame(gameId) {
+    const { data, error } = await supabase.from('game_clips').select('*').eq('game_id', gameId).order('created_at', { ascending: true })
+    if (error) { console.error(error); return }
+    setClipsByGame(prev => ({ ...prev, [gameId]: data }))
+  }
+
   async function fetchRedoVotes(gameId) {
     const { data, error } = await supabase
       .from('redo_votes')
@@ -461,22 +475,6 @@ export default function App() {
       await supabase.from('games').update(updates).eq('id', game.id)
       setFeed(feed.map(g => g.id === game.id ? { ...g, ...updates } : g))
     }
-  }
-
-
-  async function fetchClipsForGames(gameIds) {
-    if (gameIds.length === 0) return
-    const { data, error } = await supabase.from('game_clips').select('*').in('game_id', gameIds).order('created_at', { ascending: true })
-    if (error) { console.error(error); return }
-    const grouped = {}
-    data.forEach(c => { grouped[c.game_id] = grouped[c.game_id] || []; grouped[c.game_id].push(c) })
-    setClipsByGame(grouped)
-  }
-
-  async function fetchClipsForOneGame(gameId) {
-    const { data, error } = await supabase.from('game_clips').select('*').eq('game_id', gameId).order('created_at', { ascending: true })
-    if (error) { console.error(error); return }
-    setClipsByGame(prev => ({ ...prev, [gameId]: data }))
   }
 
   async function handleLogout() { await supabase.auth.signOut(); setFeed([]) }
@@ -776,21 +774,11 @@ export default function App() {
       </div>
 
       {modalOpen && (
-        <CallOutFlow
-          friends={friends}
-          uploading={uploading}
-          onCancel={() => setModalOpen(false)}
-          onSubmit={createGame}
-        />
+        <CallOutFlow friends={friends} uploading={uploading} onCancel={() => setModalOpen(false)} onSubmit={createGame} />
       )}
 
       {respondingTo && (
-        <ClipFlow
-          game={respondingTo}
-          uploading={uploading}
-          onCancel={() => setRespondingTo(null)}
-          onSubmit={submitClip}
-        />
+        <ClipFlow game={respondingTo} uploading={uploading} onCancel={() => setRespondingTo(null)} onSubmit={submitClip} />
       )}
 
       {viewingThread && (
@@ -805,3 +793,6 @@ export default function App() {
           onResolve={resolveRedoVote}
         />
       )}
+    </div>
+  )
+}
