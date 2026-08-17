@@ -179,8 +179,16 @@ body{
 .stat .lbl{ font-size:10px; color:var(--bone-dim); font-family:'JetBrains Mono',monospace; margin-top:2px; letter-spacing:0.5px;}
 
 .bottomnav{
-  position:fixed; bottom:0; width:100%; max-width:430px;
-  display:flex; background:var(--panel); border-top:1px solid var(--grip); z-index:30;
+  position:fixed;
+  bottom:0;
+  left:50%;
+  transform:translateX(-50%);
+  width:100%;
+  max-width:430px;
+  display:flex;
+  background:var(--panel);
+  border-top:1px solid var(--grip);
+  z-index:30;
 }
 .navbtn{
   flex:1; background:none; border:none;
