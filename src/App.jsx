@@ -27,7 +27,7 @@ function LetterTrack({ count }) {
   )
 }
 
-function CameraRecorder({ onCapture, seconds = 20 }) {
+function CameraRecorder({ onCapture, seconds = 12 }) {
   const videoRef = useRef(null)
   const streamRef = useRef(null)
   const recorderRef = useRef(null)
@@ -65,6 +65,17 @@ function CameraRecorder({ onCapture, seconds = 20 }) {
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
     }
   }, [facingMode])
+
+    useEffect(() => {
+    function warnBeforeLeaving(e) {
+      if (status === 'countdown' || status === 'recording') {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', warnBeforeLeaving)
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving)
+  }, [status])
 
   function beginCountdown() {
     setStatus('countdown')
