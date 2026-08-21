@@ -306,8 +306,9 @@ function ClipFlow({ game, uploading, onCancel, onSubmit }) {
   )
 }
 
-function ClipThread({ game, clips, redoVote, myBallot, onClose, onFlag, onVote, onResolve }) {
+function ClipThread({ game, clips, redoVote, myBallot, comments, onClose, onFlag, onVote, onResolve, onPostComment }) {
   const [timeLeft, setTimeLeft] = useState(null)
+  const [draft, setDraft] = useState('')
 
   useEffect(() => {
     if (!redoVote) { setTimeLeft(null); return }
@@ -365,6 +366,43 @@ function ClipThread({ game, clips, redoVote, myBallot, onClose, onFlag, onVote, 
             )}
           </div>
         ))}
+
+        <div style={{ marginTop: 8, marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Anton',sans-serif", fontSize: 13, color: 'var(--bone-dim)', marginBottom: 10 }}>
+            COMMENTS
+          </div>
+          {comments.length === 0 && (
+            <div style={{ color: 'var(--bone-dim)', fontSize: 13, marginBottom: 10 }}>No comments yet.</div>
+          )}
+          {comments.map(c => (
+            <div key={c.id} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <strong style={{ fontSize: 13 }}>{c.user_name}</strong>
+                <span style={{ fontSize: 11, color: 'var(--bone-dim)' }}>{timeAgo(c.created_at)}</span>
+              </div>
+              <div style={{ fontSize: 13 }}>{c.text}</div>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <input
+              type="text"
+              style={{ flex: 1 }}
+              placeholder="Add a comment…"
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && draft.trim()) { onPostComment(draft.trim()); setDraft('') }
+              }}
+            />
+            <button
+              className="btn-land"
+              onClick={() => { if (draft.trim()) { onPostComment(draft.trim()); setDraft('') } }}
+            >
+              POST
+            </button>
+          </div>
+        </div>
+
         <button className="btn-cancel" style={{ width: '100%' }} onClick={onClose}>CLOSE</button>
       </div>
     </div>
@@ -386,6 +424,7 @@ export default function App() {
   const [viewingThread, setViewingThread] = useState(null)
   const [redoVotes, setRedoVotes] = useState({})
   const [myBallots, setMyBallots] = useState({})
+  const [commentsByGame, setCommentsByGame] = useState({})
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false) })
@@ -414,6 +453,7 @@ export default function App() {
     if (error) { console.error(error); setLoading(false); return }
     setFeed(data)
     await fetchClipsForGames(data.map(g => g.id))
+    await fetchCommentsForGames(data.map(g => g.id))
     setLoading(false)
   }
 
@@ -430,6 +470,30 @@ export default function App() {
     const { data, error } = await supabase.from('game_clips').select('*').eq('game_id', gameId).order('created_at', { ascending: true })
     if (error) { console.error(error); return }
     setClipsByGame(prev => ({ ...prev, [gameId]: data }))
+  }
+
+  async function fetchCommentsForGames(gameIds) {
+    if (gameIds.length === 0) return
+    const { data, error } = await supabase.from('comments').select('*').in('game_id', gameIds).order('created_at', { ascending: true })
+    if (error) { console.error(error); return }
+    const grouped = {}
+    data.forEach(c => { grouped[c.game_id] = grouped[c.game_id] || []; grouped[c.game_id].push(c) })
+    setCommentsByGame(grouped)
+  }
+
+  async function fetchCommentsForOneGame(gameId) {
+    const { data, error } = await supabase.from('comments').select('*').eq('game_id', gameId).order('created_at', { ascending: true })
+    if (error) { console.error(error); return }
+    setCommentsByGame(prev => ({ ...prev, [gameId]: data }))
+  }
+
+  async function postComment(game, text) {
+    const displayName = session.user.user_metadata?.username || session.user.email.split('@')[0]
+    const { data, error } = await supabase.from('comments').insert([{
+      game_id: game.id, user_id: session.user.id, user_name: displayName, text
+    }]).select()
+    if (error) { console.error(error); return }
+    setCommentsByGame(prev => ({ ...prev, [game.id]: [...(prev[game.id] || []), data[0]] }))
   }
 
   async function fetchRedoVotes(gameId) {
@@ -636,7 +700,7 @@ export default function App() {
                   <div className="time">{timeAgo(p.created_at)}</div>
                 </div>
                 {displayClip.video_url ? (
-                  <video controls className="clip" style={{ width: '100%', background: '#000' }} src={displayClip.video_url} onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchRedoVotes(p.id) }} />
+                  <video controls className="clip" style={{ width: '100%', background: '#000' }} src={displayClip.video_url} onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchRedoVotes(p.id); fetchCommentsForOneGame(p.id) }} />
                 ) : (
                   <div className="clip" style={{ background: `linear-gradient(160deg, ${colorFor(displayClip.player_name)}, #0e0e0e 85%)` }}>
                     <div className="trick-tag">{p.trick}</div>
@@ -659,8 +723,12 @@ export default function App() {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
                     {p.likes}
                   </button>
-                  <button className="action-btn" onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchRedoVotes(p.id) }}>
+                  <button className="action-btn" onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchRedoVotes(p.id); fetchCommentsForOneGame(p.id) }}>
                     {clips.length} clip{clips.length !== 1 ? 's' : ''} — view thread
+                  </button>
+                  <button className="action-btn" onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchRedoVotes(p.id); fetchCommentsForOneGame(p.id) }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                    {(commentsByGame[p.id] || []).length}
                   </button>
                 </div>
               </div>
@@ -798,10 +866,12 @@ export default function App() {
           clips={clipsByGame[viewingThread.id] || []}
           redoVote={redoVotes[viewingThread.id]}
           myBallot={redoVotes[viewingThread.id] ? myBallots[redoVotes[viewingThread.id].id] : null}
+          comments={commentsByGame[viewingThread.id] || []}
           onClose={() => setViewingThread(null)}
           onFlag={flagRedo}
           onVote={castBallot}
           onResolve={resolveRedoVote}
+          onPostComment={(text) => postComment(viewingThread, text)}
         />
       )}
     </div>
