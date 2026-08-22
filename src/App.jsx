@@ -366,6 +366,12 @@ function ClipThread({ game, clips, myId, redoVote, myBallot, comments, onClose, 
             </div>
             {c.video_url && <video controls style={{ width: '100%', borderRadius: 8 }} src={c.video_url} />}
             <div style={{ fontSize: 11, color: 'var(--bone-dim)', marginTop: 6 }}>{timeAgo(c.created_at)} ago</div>
+            {c.flag_status === 'redone' && (
+              <div style={{ fontSize: 12, color: 'var(--tag)', marginTop: 6 }}>⚠ Community voted this needs a redo</div>
+            )}
+            {c.flag_status === 'kept' && (
+              <div style={{ fontSize: 12, color: 'var(--ok)', marginTop: 6 }}>✅ Community voted to keep this clip</div>
+            )}
             {i === clips.length - 1 && canFlag && (
               <button className="btn-cancel" style={{ width: '100%', marginTop: 10 }} onClick={() => onFlag(game, c)}>
                 🚩 FLAG FOR REDO VOTE ({2 - redosUsed} left)
@@ -559,14 +565,17 @@ export default function App() {
       const redosUsed = isTargetChallenger ? (game.self_redos_used || 0) : (game.opp_redos_used || 0)
       if (redosUsed >= 2) return
       const updates = isTargetChallenger
-        ? { self_redos_used: redosUsed + 1 }
-        : { opp_redos_used: redosUsed + 1 }
+        ? { self_redos_used: redosUsed + 1, whose_turn: vote.target_player_id }
+        : { opp_redos_used: redosUsed + 1, whose_turn: vote.target_player_id }
       const { error: gameError } = await supabase.from('games').update(updates).eq('id', game.id)
       if (gameError) { console.error(gameError); return }
-      const { error: clipError } = await supabase.from('game_clips').delete().eq('id', vote.clip_id)
+      const { error: clipError } = await supabase.from('game_clips').update({ flag_status: 'redone' }).eq('id', vote.clip_id)
       if (clipError) { console.error(clipError); return }
       setFeed(feed.map(g => g.id === game.id ? { ...g, ...updates } : g))
       setViewingThread(prev => prev && prev.id === game.id ? { ...prev, ...updates } : prev)
+      await fetchClipsForOneGame(game.id)
+    } else {
+      await supabase.from('game_clips').update({ flag_status: 'kept' }).eq('id', vote.clip_id)
       await fetchClipsForOneGame(game.id)
     }
   }
@@ -603,8 +612,8 @@ export default function App() {
     const winnerId = isFinished ? (isChallenger ? game.opponent_id : game.challenger_id) : null
 
     const updates = isChallenger
-      ? { self_letters: newLetters, finished: isFinished, winner_id: winnerId }
-      : { opp_letters: newLetters, finished: isFinished, winner_id: winnerId }
+      ? { self_letters: newLetters, finished: isFinished, winner_id: winnerId, whose_turn: isFinished ? null : game.opponent_id }
+      : { opp_letters: newLetters, finished: isFinished, winner_id: winnerId, whose_turn: isFinished ? null : game.challenger_id }
 
     const { error: updateError } = await supabase.from('games').update(updates).eq('id', game.id)
     if (updateError) { console.error(updateError); setUploading(false); return }
@@ -635,7 +644,8 @@ export default function App() {
       spot: spot || 'Local spot',
       trick: (trick || 'Kickflip').toUpperCase(),
       self_letters: 0, opp_letters: 0, likes: 0,
-      video_url: videoUrl, finished: false
+      video_url: videoUrl, finished: false,
+      whose_turn: opponentProfile.id
     }]).select()
 
     if (error) { console.error(error); setUploading(false); return }
@@ -671,12 +681,7 @@ export default function App() {
   const outgoingRequestIds = friendships.filter(f => f.status === 'pending' && f.requester_id === myId).map(f => f.addressee_id)
   const nonFriends = allPlayers.filter(p => !friendIds.includes(p.id) && !outgoingRequestIds.includes(p.id) && !incomingRequests.some(r => r.requester_id === p.id))
 
-  const pendingGamesCount = myGames.filter(g => {
-    if (g.finished) return false
-    const clips = clipsByGame[g.id] || []
-    const lastClip = clips[clips.length - 1]
-    return !lastClip || lastClip.player_id !== myId
-  }).length
+  const pendingGamesCount = myGames.filter(g => !g.finished && g.whose_turn === myId).length
 
   async function sendFriendRequest(targetId) {
     const { data, error } = await supabase.from('friendships').insert([{ requester_id: myId, addressee_id: targetId, status: 'pending' }]).select()
@@ -708,12 +713,13 @@ export default function App() {
             const clips = clipsByGame[p.id] || []
             const latestClip = clips[clips.length - 1]
             const displayClip = latestClip || { video_url: p.video_url, player_name: p.challenger_name }
+            const turnPlayerName = p.whose_turn === p.challenger_id ? p.challenger_name : p.opponent_name
             return (
               <div className="feed-card" key={p.id}>
                 <div className="feed-card-head">
                   <div className="avatar" style={{ background: colorFor(displayClip.player_name), color: '#fff' }}>{initials(displayClip.player_name)}</div>
                   <div className="who">
-                    <div className="name">{displayClip.player_name}'s turn</div>
+                    <div className="name">{p.finished ? `${displayClip.player_name} posted` : `${turnPlayerName}'s turn`}</div>
                     <div className="spot">{p.spot}</div>
                   </div>
                   <div className="time">{timeAgo(p.created_at)}</div>
@@ -761,9 +767,7 @@ export default function App() {
           <button className="new-game-btn" onClick={() => setModalOpen(true)}>+ CALL OUT SOMEONE NEW</button>
           <div className="section-head">YOUR MOVE</div>
           {myGames.filter(g => !g.finished).map((g) => {
-            const clips = clipsByGame[g.id] || []
-            const lastClip = clips[clips.length - 1]
-            const myTurn = !lastClip || lastClip.player_id !== myId
+            const myTurn = g.whose_turn === myId
             if (!myTurn) return null
             const isChallenger = g.challenger_id === myId
             return (
@@ -779,11 +783,7 @@ export default function App() {
               </div>
             )
           })}
-          {myGames.filter(g => !g.finished).every(g => {
-            const clips = clipsByGame[g.id] || []
-            const lastClip = clips[clips.length - 1]
-            return lastClip && lastClip.player_id === myId
-          }) && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games waiting on you right now.</div>}
+          {myGames.filter(g => !g.finished).every(g => g.whose_turn !== myId) && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games waiting on you right now.</div>}
         </div>
       )}
 
