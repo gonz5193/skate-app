@@ -306,21 +306,54 @@ function ClipFlow({ game, uploading, onCancel, onSubmit }) {
   )
 }
 
-function ClipThread({ game, clips, myId, comments, onClose, onRequestRedo, onPostComment }) {
+function ClipThread({ game, clips, myId, redoVote, myBallot, comments, onClose, onFlag, onVote, onResolve, onPostComment }) {
   const [draft, setDraft] = useState('')
+  const [timeLeft, setTimeLeft] = useState(null)
+
+  useEffect(() => {
+    if (!redoVote) { setTimeLeft(null); return }
+    function tick() {
+      const remaining = Math.max(0, Math.round((new Date(redoVote.closes_at).getTime() - Date.now()) / 1000))
+      setTimeLeft(remaining)
+      if (remaining === 0) onResolve(redoVote, game)
+    }
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [redoVote])
 
   const latestClip = clips[clips.length - 1]
-const posterIsChallenger = latestClip && latestClip.player_id === game.challenger_id
-const redosUsed = posterIsChallenger ? (game.self_redos_used || 0) : (game.opp_redos_used || 0)
-const isParticipant = myId === game.challenger_id || myId === game.opponent_id
-const canRedo = latestClip && redosUsed < 2 && !isParticipant
-
-
+  const posterIsChallenger = latestClip && latestClip.player_id === game.challenger_id
+  const redosUsed = posterIsChallenger ? (game.self_redos_used || 0) : (game.opp_redos_used || 0)
+  const isParticipant = myId === game.challenger_id || myId === game.opponent_id
+  const canFlag = latestClip && redosUsed < 2 && !redoVote && isParticipant && latestClip.player_id !== myId
+  const canVote = redoVote && !isParticipant && !myBallot
 
   return (
     <div className="modal-backdrop">
       <div className="modal" style={{ maxHeight: '85vh', overflowY: 'auto' }}>
         <h2>{game.trick} — {game.spot}</h2>
+
+        {redoVote && (
+          <div style={{ background: 'var(--panel)', border: '1px solid var(--tag)', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontFamily: "'Anton',sans-serif", color: 'var(--tag)', fontSize: 14, marginBottom: 6 }}>
+              ⚠ REDO VOTE IN PROGRESS — {timeLeft}s left
+            </div>
+            {isParticipant ? (
+              <div style={{ fontSize: 12, color: 'var(--bone-dim)' }}>Viewers are deciding whether this clip needs a redo. If nobody votes, it defaults to a redo.</div>
+            ) : canVote ? (
+              <>
+                <div style={{ fontSize: 12, color: 'var(--bone-dim)', marginBottom: 10 }}>Should this clip be redone?</div>
+                <div className="modal-actions">
+                  <button className="btn-land" style={{ flex: 1 }} onClick={() => onVote(redoVote.id, 'no_redo')}>KEEP IT</button>
+                  <button className="btn-miss" style={{ flex: 1 }} onClick={() => onVote(redoVote.id, 'redo')}>REDO</button>
+                </div>
+              </>
+            ) : (
+              <div style={{ color: 'var(--ok)', fontSize: 13 }}>You voted: {myBallot === 'redo' ? 'REDO' : 'KEEP IT'}</div>
+            )}
+          </div>
+        )}
 
         {clips.length === 0 && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No clips yet.</div>}
         {clips.map((c, i) => (
@@ -333,9 +366,9 @@ const canRedo = latestClip && redosUsed < 2 && !isParticipant
             </div>
             {c.video_url && <video controls style={{ width: '100%', borderRadius: 8 }} src={c.video_url} />}
             <div style={{ fontSize: 11, color: 'var(--bone-dim)', marginTop: 6 }}>{timeAgo(c.created_at)} ago</div>
-            {i === clips.length - 1 && canRedo && (
-              <button className="btn-cancel" style={{ width: '100%', marginTop: 10 }} onClick={() => onRequestRedo(game, c)}>
-                🔁 REQUEST REDO ({2 - redosUsed} left)
+            {i === clips.length - 1 && canFlag && (
+              <button className="btn-cancel" style={{ width: '100%', marginTop: 10 }} onClick={() => onFlag(game, c)}>
+                🚩 FLAG FOR REDO VOTE ({2 - redosUsed} left)
               </button>
             )}
           </div>
@@ -397,6 +430,8 @@ export default function App() {
   const [respondingTo, setRespondingTo] = useState(null)
   const [viewingThread, setViewingThread] = useState(null)
   const [commentsByGame, setCommentsByGame] = useState({})
+  const [redoVotes, setRedoVotes] = useState({})
+  const [myBallots, setMyBallots] = useState({})
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false) })
@@ -468,20 +503,72 @@ export default function App() {
     setCommentsByGame(prev => ({ ...prev, [game.id]: [...(prev[game.id] || []), data[0]] }))
   }
 
-  async function requestRedo(game, clip) {
+  async function fetchRedoVotes(gameId) {
+    const { data, error } = await supabase
+      .from('redo_votes')
+      .select('*')
+      .eq('game_id', gameId)
+      .order('opens_at', { ascending: false })
+      .limit(1)
+    if (error) { console.error(error); return }
+    if (data.length > 0 && !data[0].resolved) {
+      setRedoVotes(prev => ({ ...prev, [gameId]: data[0] }))
+      const { data: ballots } = await supabase.from('redo_ballots').select('*').eq('vote_id', data[0].id)
+      if (ballots) {
+        const mine = ballots.find(b => b.voter_id === session.user.id)
+        if (mine) setMyBallots(prev => ({ ...prev, [data[0].id]: mine.choice }))
+      }
+    } else {
+      setRedoVotes(prev => { const next = { ...prev }; delete next[gameId]; return next })
+    }
+  }
+
+  async function flagRedo(game, clip) {
     const isChallengerClip = clip.player_id === game.challenger_id
     const redosUsed = isChallengerClip ? (game.self_redos_used || 0) : (game.opp_redos_used || 0)
     if (redosUsed >= 2) return
-    const updates = isChallengerClip
-      ? { self_redos_used: redosUsed + 1 }
-      : { opp_redos_used: redosUsed + 1 }
-    const { error: gameError } = await supabase.from('games').update(updates).eq('id', game.id)
-    if (gameError) { console.error(gameError); return }
-    const { error: clipError } = await supabase.from('game_clips').delete().eq('id', clip.id)
-    if (clipError) { console.error(clipError); return }
-    setFeed(feed.map(g => g.id === game.id ? { ...g, ...updates } : g))
-    setViewingThread(prev => prev && prev.id === game.id ? { ...prev, ...updates } : prev)
-    await fetchClipsForOneGame(game.id)
+    const { data, error } = await supabase.from('redo_votes').insert([{
+      game_id: game.id,
+      clip_id: clip.id,
+      flagged_by: session.user.id,
+      target_player_id: clip.player_id,
+      opens_at: new Date().toISOString(),
+      closes_at: new Date(Date.now() + 60000).toISOString()
+    }]).select()
+    if (error) { console.error(error); return }
+    setRedoVotes(prev => ({ ...prev, [game.id]: data[0] }))
+  }
+
+  async function castBallot(voteId, choice) {
+    const { error } = await supabase.from('redo_ballots').insert([{ vote_id: voteId, voter_id: session.user.id, choice }])
+    if (error) { console.error(error); return }
+    setMyBallots(prev => ({ ...prev, [voteId]: choice }))
+  }
+
+  async function resolveRedoVote(vote, game) {
+    const { data: ballots } = await supabase.from('redo_ballots').select('*').eq('vote_id', vote.id)
+    const redoVotesCount = (ballots || []).filter(b => b.choice === 'redo').length
+    const noRedoVotesCount = (ballots || []).filter(b => b.choice === 'no_redo').length
+    const outcome = (ballots || []).length === 0 ? 'redo' : (redoVotesCount > noRedoVotesCount ? 'redo' : 'no_redo')
+
+    await supabase.from('redo_votes').update({ resolved: true, outcome }).eq('id', vote.id)
+    setRedoVotes(prev => { const next = { ...prev }; delete next[game.id]; return next })
+
+    if (outcome === 'redo') {
+      const isTargetChallenger = vote.target_player_id === game.challenger_id
+      const redosUsed = isTargetChallenger ? (game.self_redos_used || 0) : (game.opp_redos_used || 0)
+      if (redosUsed >= 2) return
+      const updates = isTargetChallenger
+        ? { self_redos_used: redosUsed + 1 }
+        : { opp_redos_used: redosUsed + 1 }
+      const { error: gameError } = await supabase.from('games').update(updates).eq('id', game.id)
+      if (gameError) { console.error(gameError); return }
+      const { error: clipError } = await supabase.from('game_clips').delete().eq('id', vote.clip_id)
+      if (clipError) { console.error(clipError); return }
+      setFeed(feed.map(g => g.id === game.id ? { ...g, ...updates } : g))
+      setViewingThread(prev => prev && prev.id === game.id ? { ...prev, ...updates } : prev)
+      await fetchClipsForOneGame(game.id)
+    }
   }
 
   async function handleLogout() { await supabase.auth.signOut(); setFeed([]) }
@@ -632,7 +719,7 @@ export default function App() {
                   <div className="time">{timeAgo(p.created_at)}</div>
                 </div>
                 {displayClip.video_url ? (
-                  <video controls className="clip" style={{ width: '100%', background: '#000' }} src={displayClip.video_url} onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchCommentsForOneGame(p.id) }} />
+                  <video controls className="clip" style={{ width: '100%', background: '#000' }} src={displayClip.video_url} onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchCommentsForOneGame(p.id); fetchRedoVotes(p.id) }} />
                 ) : (
                   <div className="clip" style={{ background: `linear-gradient(160deg, ${colorFor(displayClip.player_name)}, #0e0e0e 85%)` }}>
                     <div className="trick-tag">{p.trick}</div>
@@ -655,10 +742,10 @@ export default function App() {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
                     {p.likes}
                   </button>
-                  <button className="action-btn" onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchCommentsForOneGame(p.id) }}>
+                  <button className="action-btn" onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchCommentsForOneGame(p.id); fetchRedoVotes(p.id) }}>
                     {clips.length} clip{clips.length !== 1 ? 's' : ''} — view thread
                   </button>
-                  <button className="action-btn" onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchCommentsForOneGame(p.id) }}>
+                  <button className="action-btn" onClick={() => { setViewingThread(p); fetchClipsForOneGame(p.id); fetchCommentsForOneGame(p.id); fetchRedoVotes(p.id) }}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
                     {(commentsByGame[p.id] || []).length}
                   </button>
@@ -797,9 +884,13 @@ export default function App() {
           game={viewingThread}
           clips={clipsByGame[viewingThread.id] || []}
           myId={myId}
+          redoVote={redoVotes[viewingThread.id]}
+          myBallot={redoVotes[viewingThread.id] ? myBallots[redoVotes[viewingThread.id].id] : null}
           comments={commentsByGame[viewingThread.id] || []}
           onClose={() => setViewingThread(null)}
-          onRequestRedo={requestRedo}
+          onFlag={flagRedo}
+          onVote={castBallot}
+          onResolve={resolveRedoVote}
           onPostComment={(text) => postComment(viewingThread, text)}
         />
       )}
