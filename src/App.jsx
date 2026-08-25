@@ -364,13 +364,22 @@ function ClipThread({ game, clips, myId, redoVote, myBallot, comments, onClose, 
                 {c.landed ? 'LANDED' : 'MISSED'}
               </span>
             </div>
+            {c.is_redo && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(90,61,43,0.4)', border: '1px solid var(--wheel)', borderRadius: 6, fontFamily: "'Anton',sans-serif", fontSize: 12, color: 'var(--wheel)' }}>
+                🔁 THIS IS A REDO ATTEMPT
+              </div>
+            )}
             {c.video_url && <video controls style={{ width: '100%', borderRadius: 8 }} src={c.video_url} />}
             <div style={{ fontSize: 11, color: 'var(--bone-dim)', marginTop: 6 }}>{timeAgo(c.created_at)} ago</div>
             {c.flag_status === 'redone' && (
-              <div style={{ fontSize: 12, color: 'var(--tag)', marginTop: 6 }}>⚠ Community voted this needs a redo</div>
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(90,45,77,0.4)', border: '1px solid var(--tag)', borderRadius: 6, fontFamily: "'Anton',sans-serif", fontSize: 12, color: 'var(--tag)' }}>
+                ⚠ REDO REQUESTED — community voted this needs a redo
+              </div>
             )}
             {c.flag_status === 'kept' && (
-              <div style={{ fontSize: 12, color: 'var(--ok)', marginTop: 6 }}>✅ Community voted to keep this clip</div>
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(43,90,82,0.4)', border: '1px solid var(--ok)', borderRadius: 6, fontFamily: "'Anton',sans-serif", fontSize: 12, color: 'var(--ok)' }}>
+                ✅ KEPT — community voted to keep this clip
+              </div>
             )}
             {i === clips.length - 1 && canFlag && (
               <button className="btn-cancel" style={{ width: '100%', marginTop: 10 }} onClick={() => onFlag(game, c)}>
@@ -462,7 +471,7 @@ export default function App() {
 
   async function fetchGames() {
     setLoading(true)
-    const { data, error } = await supabase.from('games').select('*').order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('games').select('*').order('last_activity_at', { ascending: false })
     if (error) { console.error(error); setLoading(false); return }
     setFeed(data)
     await fetchClipsForGames(data.map(g => g.id))
@@ -565,13 +574,15 @@ export default function App() {
       const redosUsed = isTargetChallenger ? (game.self_redos_used || 0) : (game.opp_redos_used || 0)
       if (redosUsed >= 2) return
       const updates = isTargetChallenger
-        ? { self_redos_used: redosUsed + 1, whose_turn: vote.target_player_id }
-        : { opp_redos_used: redosUsed + 1, whose_turn: vote.target_player_id }
+        ? { self_redos_used: redosUsed + 1, whose_turn: vote.target_player_id, awaiting_redo: true, last_activity_at: new Date().toISOString() }
+        : { opp_redos_used: redosUsed + 1, whose_turn: vote.target_player_id, awaiting_redo: true, last_activity_at: new Date().toISOString() }
       const { error: gameError } = await supabase.from('games').update(updates).eq('id', game.id)
       if (gameError) { console.error(gameError); return }
       const { error: clipError } = await supabase.from('game_clips').update({ flag_status: 'redone' }).eq('id', vote.clip_id)
       if (clipError) { console.error(clipError); return }
-      setFeed(feed.map(g => g.id === game.id ? { ...g, ...updates } : g))
+      const updatedFeed = feed.map(g => g.id === game.id ? { ...g, ...updates } : g)
+      updatedFeed.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))
+      setFeed(updatedFeed)
       setViewingThread(prev => prev && prev.id === game.id ? { ...prev, ...updates } : prev)
       await fetchClipsForOneGame(game.id)
     } else {
@@ -610,20 +621,23 @@ export default function App() {
     const newLetters = landed ? currentLetters : Math.min(5, currentLetters + 1)
     const isFinished = newLetters >= 5
     const winnerId = isFinished ? (isChallenger ? game.opponent_id : game.challenger_id) : null
+    const isRedoAttempt = game.awaiting_redo || false
 
     const updates = isChallenger
-      ? { self_letters: newLetters, finished: isFinished, winner_id: winnerId, whose_turn: isFinished ? null : game.opponent_id }
-      : { opp_letters: newLetters, finished: isFinished, winner_id: winnerId, whose_turn: isFinished ? null : game.challenger_id }
+      ? { self_letters: newLetters, finished: isFinished, winner_id: winnerId, whose_turn: isFinished ? null : game.opponent_id, awaiting_redo: false, last_activity_at: new Date().toISOString() }
+      : { opp_letters: newLetters, finished: isFinished, winner_id: winnerId, whose_turn: isFinished ? null : game.challenger_id, awaiting_redo: false, last_activity_at: new Date().toISOString() }
 
     const { error: updateError } = await supabase.from('games').update(updates).eq('id', game.id)
     if (updateError) { console.error(updateError); setUploading(false); return }
 
     const { error: clipError } = await supabase.from('game_clips').insert([{
-      game_id: game.id, player_id: myId, player_name: displayName, video_url: videoUrl, landed
+      game_id: game.id, player_id: myId, player_name: displayName, video_url: videoUrl, landed, is_redo: isRedoAttempt
     }])
     if (clipError) console.error(clipError)
 
-    setFeed(feed.map(g => g.id === game.id ? { ...g, ...updates } : g))
+    const updatedFeed = feed.map(g => g.id === game.id ? { ...g, ...updates } : g)
+    updatedFeed.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))
+    setFeed(updatedFeed)
     await fetchClipsForOneGame(game.id)
     setUploading(false)
     setRespondingTo(null)
@@ -645,7 +659,8 @@ export default function App() {
       trick: (trick || 'Kickflip').toUpperCase(),
       self_letters: 0, opp_letters: 0, likes: 0,
       video_url: videoUrl, finished: false,
-      whose_turn: opponentProfile.id
+      whose_turn: opponentProfile.id,
+      last_activity_at: new Date().toISOString()
     }]).select()
 
     if (error) { console.error(error); setUploading(false); return }
@@ -730,6 +745,15 @@ export default function App() {
                   <div className="clip" style={{ background: `linear-gradient(160deg, ${colorFor(displayClip.player_name)}, #0e0e0e 85%)` }}>
                     <div className="trick-tag">{p.trick}</div>
                   </div>
+                )}
+                {displayClip.flag_status === 'redone' && (
+                  <div style={{ padding: '6px 14px', background: 'var(--panel-raised)', fontSize: 12, color: 'var(--tag)' }}>⚠ Community voted this needs a redo</div>
+                )}
+                {displayClip.flag_status === 'kept' && (
+                  <div style={{ padding: '6px 14px', background: 'var(--panel-raised)', fontSize: 12, color: 'var(--ok)' }}>✅ Community voted to keep this clip</div>
+                )}
+                {displayClip.is_redo && (
+                  <div style={{ padding: '6px 14px', background: 'var(--panel-raised)', fontSize: 12, color: 'var(--wheel)' }}>🔁 Redo attempt</div>
                 )}
                 {p.finished && <div style={{ padding: '8px 14px', background: 'var(--panel-raised)', fontFamily: "'Anton',sans-serif", fontSize: 12, color: 'var(--wheel)' }}>GAME OVER</div>}
                 <div className="vs-row">
