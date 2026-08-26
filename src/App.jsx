@@ -747,7 +747,7 @@ export default function App() {
                   </div>
                 )}
                 {displayClip.flag_status === 'redone' && (
-                  <div style={{ padding: '6px 14px', background: 'var(--panel-raised)', fontSize: 12, color: 'var(--tag)' }}>⚠ Community voted this needs a redo</div>
+                  <div style={{ padding: '6px 14px', background: 'var(--panel-raised)', fontSize: 12, color: 'var(--tag)' }}>⚠ REDO</div>
                 )}
                 {displayClip.flag_status === 'kept' && (
                   <div style={{ padding: '6px 14px', background: 'var(--panel-raised)', fontSize: 12, color: 'var(--ok)' }}>✅ Community voted to keep this clip</div>
