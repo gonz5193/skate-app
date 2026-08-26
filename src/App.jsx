@@ -4,6 +4,11 @@ import { supabase } from './supabaseClient'
 
 const colors = ['#5a3d2b','#2b3d5a','#3d5a2b','#5a2b4d','#2b5a52','#5a4a2b']
 
+const [friendSearch, setFriendSearch] = useState('')
+const searchResults = friendSearch.trim() === ''
+  ? []
+  : nonFriends.filter(p => p.username.toLowerCase().includes(friendSearch.trim().toLowerCase()))
+
 function initials(name){ return (name||'??').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase() }
 function colorFor(name){
   const sum = (name||'x').split('').reduce((a,c) => a + c.charCodeAt(0), 0)
@@ -839,14 +844,26 @@ export default function App() {
             </div>
           ))}
           <div className="section-head" style={{ marginTop: 24 }}>ADD FRIENDS</div>
-          {nonFriends.length === 0 && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No one new to add right now.</div>}
-          {nonFriends.map(p => (
-            <div className="feed-card-head" key={p.id} style={{ padding: '10px 4px' }}>
-              <div className="avatar" style={{ background: colorFor(p.username), color: '#fff' }}>{initials(p.username)}</div>
-              <div className="who"><div className="name">{p.username}</div></div>
-              <button className="action-btn" style={{ background: 'var(--wheel)', color: '#1a1200', padding: '6px 12px', borderRadius: 6, fontFamily: "'Anton',sans-serif" }} onClick={() => sendFriendRequest(p.id)}>ADD</button>
-            </div>
-          ))}
+<input
+  type="text"
+  placeholder="Search by username…"
+  value={friendSearch}
+  onChange={e => setFriendSearch(e.target.value)}
+  style={{ marginBottom: 12 }}
+/>
+{friendSearch.trim() === '' && (
+  <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Start typing a username to find someone.</div>
+)}
+{friendSearch.trim() !== '' && searchResults.length === 0 && (
+  <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No one found with that username.</div>
+)}
+{searchResults.map(p => (
+  <div className="feed-card-head" key={p.id} style={{ padding: '10px 4px' }}>
+    <div className="avatar" style={{ background: colorFor(p.username), color: '#fff' }}>{initials(p.username)}</div>
+    <div className="who"><div className="name">{p.username}</div></div>
+    <button className="action-btn" style={{ background: 'var(--wheel)', color: '#1a1200', padding: '6px 12px', borderRadius: 6, fontFamily: "'Anton',sans-serif" }} onClick={() => sendFriendRequest(p.id)}>ADD</button>
+  </div>
+))}
         </div>
       )}
 
