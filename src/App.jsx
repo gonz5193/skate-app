@@ -168,6 +168,7 @@ function AuthScreen({ onAuthed }) {
   const [username, setUsername] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
 
   async function handleSubmit() {
     setError(''); setLoading(true)
@@ -179,6 +180,45 @@ function AuthScreen({ onAuthed }) {
       if (error) setError(error.message); else onAuthed(data.user)
     }
     setLoading(false)
+  }
+
+  async function handleForgotPassword() {
+    setError(''); setLoading(true)
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+    if (error) setError(error.message); else setResetSent(true)
+    setLoading(false)
+  }
+
+  if (mode === 'forgot') {
+    return (
+      <div className="app">
+        <div className="screen" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh', paddingBottom: 16 }}>
+          <div className="wordmark" style={{ justifyContent: 'center', fontSize: 40, marginBottom: 8 }}><span>SKATE</span><span>.</span></div>
+          <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 13, marginBottom: 32 }}>
+            Reset your password
+          </div>
+          {resetSent ? (
+            <div style={{ textAlign: 'center', color: 'var(--ok)', fontSize: 13, marginBottom: 20 }}>
+              Check your email for a password reset link.
+            </div>
+          ) : (
+            <>
+              <div className="field"><label>EMAIL</label>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" />
+              </div>
+              {error && <div style={{ color: 'var(--tag)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+              <button className="btn-submit" style={{ width: '100%', marginTop: 8 }} onClick={handleForgotPassword} disabled={loading}>
+                {loading ? 'SENDING…' : 'SEND RESET LINK'}
+              </button>
+            </>
+          )}
+          <button className="action-btn" style={{ justifyContent: 'center', marginTop: 20 }}
+            onClick={() => { setMode('login'); setError(''); setResetSent(false) }}>
+            Back to log in
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -199,6 +239,11 @@ function AuthScreen({ onAuthed }) {
         <div className="field"><label>PASSWORD</label>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 6 characters" />
         </div>
+        {mode === 'login' && (
+          <button className="action-btn" style={{ justifyContent: 'flex-end', marginBottom: 8 }} onClick={() => { setMode('forgot'); setError('') }}>
+            Forgot password?
+          </button>
+        )}
         {error && <div style={{ color: 'var(--tag)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
         <button className="btn-submit" style={{ width: '100%', marginTop: 8 }} onClick={handleSubmit} disabled={loading}>
           {loading ? 'PLEASE WAIT…' : mode === 'login' ? 'LOG IN' : 'SIGN UP'}
@@ -206,6 +251,45 @@ function AuthScreen({ onAuthed }) {
         <button className="action-btn" style={{ justifyContent: 'center', marginTop: 20 }}
           onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>
           {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ResetPasswordScreen({ onDone }) {
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit() {
+    setError('')
+    if (password.length < 6) { setError('Password must be at least 6 characters.'); return }
+    if (password !== confirmPassword) { setError('Passwords do not match.'); return }
+    setLoading(true)
+    const { error } = await supabase.auth.updateUser({ password })
+    if (error) { setError(error.message); setLoading(false); return }
+    setLoading(false)
+    onDone()
+  }
+
+  return (
+    <div className="app">
+      <div className="screen" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh', paddingBottom: 16 }}>
+        <div className="wordmark" style={{ justifyContent: 'center', fontSize: 40, marginBottom: 8 }}><span>SKATE</span><span>.</span></div>
+        <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 13, marginBottom: 32 }}>
+          Set a new password
+        </div>
+        <div className="field"><label>NEW PASSWORD</label>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 6 characters" />
+        </div>
+        <div className="field"><label>CONFIRM PASSWORD</label>
+          <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter password" />
+        </div>
+        {error && <div style={{ color: 'var(--tag)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+        <button className="btn-submit" style={{ width: '100%', marginTop: 8 }} onClick={handleSubmit} disabled={loading}>
+          {loading ? 'SAVING…' : 'SAVE NEW PASSWORD'}
         </button>
       </div>
     </div>
@@ -448,10 +532,14 @@ export default function App() {
   const [commentsByGame, setCommentsByGame] = useState({})
   const [redoVotes, setRedoVotes] = useState({})
   const [myBallots, setMyBallots] = useState({})
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false) })
-    const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => setSession(session))
+    const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => {
+      setSession(session)
+      if (_e === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
+    })
     return () => listener.subscription.unsubscribe()
   }, [])
 
@@ -678,6 +766,7 @@ export default function App() {
   }
 
   if (authLoading) return <div className="app" style={{ minHeight: '100vh' }} />
+  if (passwordRecovery) return <ResetPasswordScreen onDone={() => setPasswordRecovery(false)} />
   if (!session) return <AuthScreen onAuthed={() => {}} />
 
   const myId = session.user.id
