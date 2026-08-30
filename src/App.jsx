@@ -390,9 +390,13 @@ function ClipFlow({ game, uploading, onCancel, onSubmit }) {
   )
 }
 
-function ClipThread({ game, clips, myId, redoVote, myBallot, comments, onClose, onFlag, onVote, onResolve, onPostComment }) {
+function ClipThread({ game, clips, myId, redoVote, myBallot, comments, onClose, onFlag, onVote, onResolve, onPostComment, onReportContent, onBlockUser }) {
   const [draft, setDraft] = useState('')
   const [timeLeft, setTimeLeft] = useState(null)
+  const [reportingClipId, setReportingClipId] = useState(null)
+  const [reportingCommentId, setReportingCommentId] = useState(null)
+  const [reportText, setReportText] = useState('')
+  const [reportedIds, setReportedIds] = useState([])
 
   useEffect(() => {
     if (!redoVote) { setTimeLeft(null); return }
@@ -444,10 +448,40 @@ function ClipThread({ game, clips, myId, redoVote, myBallot, comments, onClose, 
           <div key={c.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--grip)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
               <strong>{c.player_name}</strong>
-              <span style={{ color: c.landed ? 'var(--ok)' : 'var(--tag)', fontSize: 12, fontFamily: "'JetBrains Mono',monospace" }}>
-                {c.landed ? 'LANDED' : 'MISSED'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: c.landed ? 'var(--ok)' : 'var(--tag)', fontSize: 12, fontFamily: "'JetBrains Mono',monospace" }}>
+                  {c.landed ? 'LANDED' : 'MISSED'}
+                </span>
+                {c.player_id !== myId && (
+                  <>
+                    <button style={{ background: 'none', border: 'none', color: 'var(--bone-dim)', fontSize: 11, cursor: 'pointer' }}
+                      onClick={() => setReportingClipId(reportingClipId === c.id ? null : c.id)}>
+                      REPORT
+                    </button>
+                    <button style={{ background: 'none', border: 'none', color: 'var(--bone-dim)', fontSize: 11, cursor: 'pointer' }}
+                      onClick={() => { if (window.confirm(`Block ${c.player_name}? This removes them as a friend and hides their content from your feed.`)) onBlockUser(c.player_id) }}>
+                      BLOCK
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
+            {reportingClipId === c.id && (
+              <div style={{ marginBottom: 10 }}>
+                {reportedIds.includes(c.id) ? (
+                  <div style={{ color: 'var(--ok)', fontSize: 12 }}>Reported. Thanks for flagging this.</div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input type="text" style={{ flex: 1 }} placeholder="Why are you reporting this clip?"
+                      value={reportText} onChange={e => setReportText(e.target.value)} />
+                    <button className="btn-land" onClick={() => {
+                      onReportContent('clip', c.id, c.player_id, reportText)
+                      setReportedIds(prev => [...prev, c.id]); setReportText(''); setReportingClipId(null)
+                    }}>SEND</button>
+                  </div>
+                )}
+              </div>
+            )}
             {c.is_redo && (
               <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(90,61,43,0.4)', border: '1px solid var(--wheel)', borderRadius: 6, fontFamily: "'Anton',sans-serif", fontSize: 12, color: 'var(--wheel)' }}>
                 🔁 THIS IS A REDO ATTEMPT
@@ -485,8 +519,28 @@ function ClipThread({ game, clips, myId, redoVote, myBallot, comments, onClose, 
               <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                 <strong style={{ fontSize: 13 }}>{c.user_name}</strong>
                 <span style={{ fontSize: 11, color: 'var(--bone-dim)' }}>{timeAgo(c.created_at)}</span>
+                {c.user_id !== myId && (
+                  <button style={{ background: 'none', border: 'none', color: 'var(--bone-dim)', fontSize: 10, cursor: 'pointer', marginLeft: 'auto' }}
+                    onClick={() => setReportingCommentId(reportingCommentId === c.id ? null : c.id)}>
+                    REPORT
+                  </button>
+                )}
               </div>
               <div style={{ fontSize: 13 }}>{c.text}</div>
+              {reportingCommentId === c.id && (
+                reportedIds.includes(c.id) ? (
+                  <div style={{ color: 'var(--ok)', fontSize: 12, marginTop: 4 }}>Reported. Thanks for flagging this.</div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <input type="text" style={{ flex: 1 }} placeholder="Why are you reporting this comment?"
+                      value={reportText} onChange={e => setReportText(e.target.value)} />
+                    <button className="btn-land" onClick={() => {
+                      onReportContent('comment', c.id, c.user_id, reportText)
+                      setReportedIds(prev => [...prev, c.id]); setReportText(''); setReportingCommentId(null)
+                    }}>SEND</button>
+                  </div>
+                )
+              )}
             </div>
           ))}
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -533,6 +587,7 @@ export default function App() {
   const [redoVotes, setRedoVotes] = useState({})
   const [myBallots, setMyBallots] = useState({})
   const [passwordRecovery, setPasswordRecovery] = useState(false)
+  const [blockedIds, setBlockedIds] = useState([])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false) })
@@ -544,7 +599,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (session) { fetchGames(); fetchAllPlayers(); fetchFriendships() }
+    if (session) { fetchGames(); fetchAllPlayers(); fetchFriendships(); fetchBlocks() }
   }, [session])
 
   async function fetchAllPlayers() {
@@ -556,6 +611,39 @@ export default function App() {
     const { data, error } = await supabase.from('friendships').select('*')
       .or(`requester_id.eq.${session.user.id},addressee_id.eq.${session.user.id}`)
     if (error) console.error(error); else setFriendships(data)
+  }
+
+  async function fetchBlocks() {
+    const { data, error } = await supabase.from('blocks').select('blocked_id').eq('blocker_id', session.user.id)
+    if (error) { console.error(error); return }
+    setBlockedIds(data.map(b => b.blocked_id))
+  }
+
+  async function blockUser(targetId) {
+    const { error } = await supabase.from('blocks').insert([{ blocker_id: session.user.id, blocked_id: targetId }])
+    if (error) { console.error(error); return }
+    await supabase.from('friendships').delete()
+      .or(`and(requester_id.eq.${session.user.id},addressee_id.eq.${targetId}),and(requester_id.eq.${targetId},addressee_id.eq.${session.user.id})`)
+    setBlockedIds(prev => [...prev, targetId])
+    setFriendships(friendships.filter(f =>
+      !((f.requester_id === session.user.id && f.addressee_id === targetId) ||
+        (f.requester_id === targetId && f.addressee_id === session.user.id))
+    ))
+    setViewingThread(null)
+  }
+
+  async function unblockUser(targetId) {
+    const { error } = await supabase.from('blocks').delete().eq('blocker_id', session.user.id).eq('blocked_id', targetId)
+    if (error) { console.error(error); return }
+    setBlockedIds(prev => prev.filter(id => id !== targetId))
+  }
+
+  async function reportContent(contentType, contentId, reportedUserId, reason) {
+    const { error } = await supabase.from('reports').insert([{
+      reporter_id: session.user.id, reported_user_id: reportedUserId,
+      content_type: contentType, content_id: String(contentId), reason
+    }])
+    if (error) console.error(error)
   }
 
   async function fetchGames() {
@@ -772,6 +860,8 @@ export default function App() {
   const myId = session.user.id
   const displayName = session.user.user_metadata?.username || session.user.email.split('@')[0]
   const myGames = feed.filter(g => g.challenger_id === myId || g.opponent_id === myId)
+  const visibleFeed = feed.filter(g => !blockedIds.includes(g.challenger_id) && !blockedIds.includes(g.opponent_id))
+  const activeGames = myGames.filter(g => !g.finished && !blockedIds.includes(g.challenger_id) && !blockedIds.includes(g.opponent_id))
   const finishedGames = myGames.filter(g => g.finished)
   const wins = finishedGames.filter(g => g.winner_id === myId).length
   const losses = finishedGames.filter(g => g.winner_id && g.winner_id !== myId).length
@@ -784,12 +874,12 @@ export default function App() {
   const friends = allPlayers.filter(p => friendIds.includes(p.id))
   const incomingRequests = friendships.filter(f => f.status === 'pending' && f.addressee_id === myId)
   const outgoingRequestIds = friendships.filter(f => f.status === 'pending' && f.requester_id === myId).map(f => f.addressee_id)
-  const nonFriends = allPlayers.filter(p => !friendIds.includes(p.id) && !outgoingRequestIds.includes(p.id) && !incomingRequests.some(r => r.requester_id === p.id))
+  const nonFriends = allPlayers.filter(p => !friendIds.includes(p.id) && !outgoingRequestIds.includes(p.id) && !incomingRequests.some(r => r.requester_id === p.id) && !blockedIds.includes(p.id))
   const searchResults = friendSearch.trim() === ''
     ? []
     : nonFriends.filter(p => p.username.toLowerCase().includes(friendSearch.trim().toLowerCase()))
 
-  const pendingGamesCount = myGames.filter(g => !g.finished && g.whose_turn === myId).length
+  const pendingGamesCount = activeGames.filter(g => g.whose_turn === myId).length
 
   async function sendFriendRequest(targetId) {
     const { data, error } = await supabase.from('friendships').insert([{ requester_id: myId, addressee_id: targetId, status: 'pending' }]).select()
@@ -816,8 +906,8 @@ export default function App() {
         <div className="screen">
           <div className="section-head">WORLDWIDE FEED</div>
           {loading && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Loading games…</div>}
-          {!loading && feed.length === 0 && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games yet. Call someone out.</div>}
-          {feed.map((p) => {
+          {!loading && visibleFeed.length === 0 && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games yet. Call someone out.</div>}
+          {visibleFeed.map((p) => {
             const clips = clipsByGame[p.id] || []
             const latestClip = clips[clips.length - 1]
             const displayClip = latestClip || { video_url: p.video_url, player_name: p.challenger_name }
@@ -883,7 +973,7 @@ export default function App() {
         <div className="screen">
           <button className="new-game-btn" onClick={() => setModalOpen(true)}>+ CALL OUT SOMEONE NEW</button>
           <div className="section-head">YOUR MOVE</div>
-          {myGames.filter(g => !g.finished).map((g) => {
+          {activeGames.map((g) => {
             const myTurn = g.whose_turn === myId
             if (!myTurn) return null
             const isChallenger = g.challenger_id === myId
@@ -900,7 +990,7 @@ export default function App() {
               </div>
             )
           })}
-          {myGames.filter(g => !g.finished).every(g => g.whose_turn !== myId) && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games waiting on you right now.</div>}
+          {activeGames.every(g => g.whose_turn !== myId) && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games waiting on you right now.</div>}
         </div>
       )}
 
@@ -929,6 +1019,10 @@ export default function App() {
             <div className="feed-card-head" key={f.id} style={{ padding: '10px 4px' }}>
               <div className="avatar" style={{ background: colorFor(f.username), color: '#fff' }}>{initials(f.username)}</div>
               <div className="who"><div className="name">{f.username}</div></div>
+              <button className="action-btn" style={{ color: 'var(--tag)', fontSize: 11 }}
+                onClick={() => { if (window.confirm(`Block ${f.username}? This removes them as a friend and hides their content from your feed.`)) blockUser(f.id) }}>
+                BLOCK
+              </button>
             </div>
           ))}
           <div className="section-head" style={{ marginTop: 24 }}>ADD FRIENDS</div>
@@ -952,6 +1046,21 @@ export default function App() {
               <button className="action-btn" style={{ background: 'var(--wheel)', color: '#1a1200', padding: '6px 12px', borderRadius: 6, fontFamily: "'Anton',sans-serif" }} onClick={() => sendFriendRequest(p.id)}>ADD</button>
             </div>
           ))}
+          {blockedIds.length > 0 && (
+            <>
+              <div className="section-head" style={{ marginTop: 24 }}>BLOCKED USERS</div>
+              {blockedIds.map(id => {
+                const blockedProfile = allPlayers.find(p => p.id === id)
+                return (
+                  <div className="feed-card-head" key={id} style={{ padding: '10px 4px' }}>
+                    <div className="avatar" style={{ background: colorFor(blockedProfile?.username), color: '#fff' }}>{initials(blockedProfile?.username)}</div>
+                    <div className="who"><div className="name">{blockedProfile?.username || 'Unknown'}</div></div>
+                    <button className="action-btn" onClick={() => unblockUser(id)}>UNBLOCK</button>
+                  </div>
+                )
+              })}
+            </>
+          )}
         </div>
       )}
 
@@ -1015,12 +1124,14 @@ export default function App() {
           myId={myId}
           redoVote={redoVotes[viewingThread.id]}
           myBallot={redoVotes[viewingThread.id] ? myBallots[redoVotes[viewingThread.id].id] : null}
-          comments={commentsByGame[viewingThread.id] || []}
+          comments={(commentsByGame[viewingThread.id] || []).filter(c => !blockedIds.includes(c.user_id))}
           onClose={() => setViewingThread(null)}
           onFlag={flagRedo}
           onVote={castBallot}
           onResolve={resolveRedoVote}
           onPostComment={(text) => postComment(viewingThread, text)}
+          onReportContent={reportContent}
+          onBlockUser={blockUser}
         />
       )}
     </div>
