@@ -249,14 +249,14 @@ function AuthScreen({ onAuthed }) {
           {loading ? 'PLEASE WAIT…' : mode === 'login' ? 'LOG IN' : 'SIGN UP'}
         </button>
         <button className="action-btn" style={{ justifyContent: 'center', marginTop: 20 }}
-  onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>
-  {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
-</button>
-{mode === 'signup' && (
-  <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 11, marginTop: 16 }}>
-    By signing up, you agree to our <a href="/terms-of-service.html" target="_blank" style={{ color: 'var(--wheel)' }}>Terms</a> and <a href="/privacy-policy.html" target="_blank" style={{ color: 'var(--wheel)' }}>Privacy Policy</a>.
-  </div>
-)}
+          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>
+          {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
+        </button>
+        {mode === 'signup' && (
+          <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 11, marginTop: 16 }}>
+            By signing up, you agree to our <a href="/terms-of-service.html" target="_blank" style={{ color: 'var(--wheel)' }}>Terms</a> and <a href="/privacy-policy.html" target="_blank" style={{ color: 'var(--wheel)' }}>Privacy Policy</a>.
+          </div>
+        )}
       </div>
     </div>
   )
@@ -867,6 +867,7 @@ export default function App() {
   const myGames = feed.filter(g => g.challenger_id === myId || g.opponent_id === myId)
   const visibleFeed = feed.filter(g => !blockedIds.includes(g.challenger_id) && !blockedIds.includes(g.opponent_id))
   const activeGames = myGames.filter(g => !g.finished && !blockedIds.includes(g.challenger_id) && !blockedIds.includes(g.opponent_id))
+  const pendingCallouts = activeGames.filter(g => g.challenger_id === myId && g.whose_turn === g.opponent_id)
   const finishedGames = myGames.filter(g => g.finished)
   const wins = finishedGames.filter(g => g.winner_id === myId).length
   const losses = finishedGames.filter(g => g.winner_id && g.winner_id !== myId).length
@@ -887,19 +888,30 @@ export default function App() {
   const pendingGamesCount = activeGames.filter(g => g.whose_turn === myId).length
 
   async function sendFriendRequest(targetId) {
-  const existing = friendships.find(f =>
-    (f.requester_id === myId && f.addressee_id === targetId) ||
-    (f.requester_id === targetId && f.addressee_id === myId)
-  )
-  if (existing) {
-    if (existing.status === 'pending' && existing.requester_id === targetId) {
-      await respondToRequest(existing.id, true)
+    const existing = friendships.find(f =>
+      (f.requester_id === myId && f.addressee_id === targetId) ||
+      (f.requester_id === targetId && f.addressee_id === myId)
+    )
+    if (existing) {
+      if (existing.status === 'pending' && existing.requester_id === targetId) {
+        await respondToRequest(existing.id, true)
+      }
+      return
     }
-    return
+    const { data, error } = await supabase.from('friendships').insert([{ requester_id: myId, addressee_id: targetId, status: 'pending' }]).select()
+    if (error) console.error(error); else setFriendships([...friendships, data[0]])
   }
-  const { data, error } = await supabase.from('friendships').insert([{ requester_id: myId, addressee_id: targetId, status: 'pending' }]).select()
-  if (error) console.error(error); else setFriendships([...friendships, data[0]])
-}
+  async function deleteGame(game) {
+    if (!window.confirm(`Delete this callout to ${game.opponent_name}? This can't be undone.`)) return
+    await supabase.from('game_clips').delete().eq('game_id', game.id)
+    await supabase.from('comments').delete().eq('game_id', game.id)
+    await supabase.from('redo_votes').delete().eq('game_id', game.id)
+    const { error } = await supabase.from('games').delete().eq('id', game.id)
+    if (error) { console.error(error); return }
+    setFeed(feed.filter(g => g.id !== game.id))
+    setClipsByGame(prev => { const next = { ...prev }; delete next[game.id]; return next })
+    setCommentsByGame(prev => { const next = { ...prev }; delete next[game.id]; return next })
+  }
   async function respondToRequest(friendshipId, accept) {
     if (accept) {
       const { error } = await supabase.from('friendships').update({ status: 'accepted' }).eq('id', friendshipId)
@@ -1006,6 +1018,22 @@ export default function App() {
             )
           })}
           {activeGames.every(g => g.whose_turn !== myId) && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games waiting on you right now.</div>}
+          {pendingCallouts.length > 0 && (
+            <>
+              <div className="section-head" style={{ marginTop: 24 }}>YOUR PENDING CALLOUTS</div>
+              {pendingCallouts.map(g => (
+                <div className="game-card" key={g.id}>
+                  <div className="top-row">
+                    <div className="opp-name">{g.opponent_name}</div>
+                  </div>
+                  <div className="set-trick">TRICK SET: {g.trick} — {g.spot} · waiting on their response</div>
+                  <div className="game-buttons">
+                    <button className="btn-cancel" style={{ flex: 1 }} onClick={() => deleteGame(g)}>DELETE CALLOUT</button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
 
