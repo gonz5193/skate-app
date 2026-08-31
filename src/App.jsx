@@ -37,6 +37,7 @@ function CameraRecorder({ onCapture, seconds = 12 }) {
   const [timeLeft, setTimeLeft] = useState(seconds)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [facingMode, setFacingMode] = useState('environment')
+  const [feedTab, setFeedTab] = useState('friends') 
 
   useEffect(() => {
     let cancelled = false
@@ -882,6 +883,15 @@ export default function App() {
   const outgoingRequestIds = friendships.filter(f => f.status === 'pending' && f.requester_id === myId).map(f => f.addressee_id)
   const nonFriends = allPlayers.filter(p => !friendIds.includes(p.id) && !outgoingRequestIds.includes(p.id) && !incomingRequests.some(r => r.requester_id === p.id) && !blockedIds.includes(p.id))
   const searchResults = friendSearch.trim() === ''
+  const friendsFeed = visibleFeed.filter(g =>
+  g.challenger_id === myId || g.opponent_id === myId ||
+  friendIds.includes(g.challenger_id) || friendIds.includes(g.opponent_id)
+)
+const discoverFeed = visibleFeed.filter(g =>
+  g.challenger_id !== myId && g.opponent_id !== myId &&
+  !friendIds.includes(g.challenger_id) && !friendIds.includes(g.opponent_id)
+)
+const activeFeed = feedTab === 'friends' ? friendsFeed : discoverFeed
     ? []
     : nonFriends.filter(p => p.username.toLowerCase().includes(friendSearch.trim().toLowerCase()))
 
@@ -931,10 +941,26 @@ export default function App() {
 
       {screen === 'feed' && (
         <div className="screen">
-          <div className="section-head">WORLDWIDE FEED</div>
-          {loading && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Loading games…</div>}
-          {!loading && visibleFeed.length === 0 && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>No games yet. Call someone out.</div>}
-          {visibleFeed.map((p) => {
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+  <button
+    onClick={() => setFeedTab('friends')}
+    className={feedTab === 'friends' ? 'btn-submit' : 'btn-cancel'}
+    style={{ flex: 1 }}
+  >FRIENDS</button>
+  <button
+    onClick={() => setFeedTab('discover')}
+    className={feedTab === 'discover' ? 'btn-submit' : 'btn-cancel'}
+    style={{ flex: 1 }}
+  >DISCOVER</button>
+</div>
+<div className="section-head">{feedTab === 'friends' ? "YOUR FRIENDS' GAMES" : 'OTHER GAMES AROUND THE WORLD'}</div>
+{loading && <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>Loading games…</div>}
+{!loading && activeFeed.length === 0 && (
+  <div style={{ color: 'var(--bone-dim)', fontSize: 13 }}>
+    {feedTab === 'friends' ? 'No games from you or your friends yet. Call someone out.' : 'No other games out there yet — check back soon.'}
+  </div>
+)}
+{activeFeed.map((p) => {
             const clips = clipsByGame[p.id] || []
             const latestClip = clips[clips.length - 1]
             const displayClip = latestClip || { video_url: p.video_url, player_name: p.challenger_name }
