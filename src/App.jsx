@@ -887,9 +887,19 @@ export default function App() {
   const pendingGamesCount = activeGames.filter(g => g.whose_turn === myId).length
 
   async function sendFriendRequest(targetId) {
-    const { data, error } = await supabase.from('friendships').insert([{ requester_id: myId, addressee_id: targetId, status: 'pending' }]).select()
-    if (error) console.error(error); else setFriendships([...friendships, data[0]])
+  const existing = friendships.find(f =>
+    (f.requester_id === myId && f.addressee_id === targetId) ||
+    (f.requester_id === targetId && f.addressee_id === myId)
+  )
+  if (existing) {
+    if (existing.status === 'pending' && existing.requester_id === targetId) {
+      await respondToRequest(existing.id, true)
+    }
+    return
   }
+  const { data, error } = await supabase.from('friendships').insert([{ requester_id: myId, addressee_id: targetId, status: 'pending' }]).select()
+  if (error) console.error(error); else setFriendships([...friendships, data[0]])
+}
   async function respondToRequest(friendshipId, accept) {
     if (accept) {
       const { error } = await supabase.from('friendships').update({ status: 'accepted' }).eq('id', friendshipId)
