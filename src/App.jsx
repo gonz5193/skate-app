@@ -249,9 +249,14 @@ function AuthScreen({ onAuthed }) {
           {loading ? 'PLEASE WAIT…' : mode === 'login' ? 'LOG IN' : 'SIGN UP'}
         </button>
         <button className="action-btn" style={{ justifyContent: 'center', marginTop: 20 }}
-          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>
-          {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
-        </button>
+  onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>
+  {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
+</button>
+{mode === 'signup' && (
+  <div style={{ textAlign: 'center', color: 'var(--bone-dim)', fontSize: 11, marginTop: 16 }}>
+    By signing up, you agree to our <a href="/terms-of-service.html" target="_blank" style={{ color: 'var(--wheel)' }}>Terms</a> and <a href="/privacy-policy.html" target="_blank" style={{ color: 'var(--wheel)' }}>Privacy Policy</a>.
+  </div>
+)}
       </div>
     </div>
   )
